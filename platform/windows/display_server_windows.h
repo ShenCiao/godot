@@ -261,6 +261,7 @@ class DisplayServerWindows : public DisplayServer {
 	bool old_invalid;
 	int old_x, old_y;
 	Point2i center;
+	HashMap<int64_t, Vector2> winink_pen_last_pos;
 
 #if defined(GLES3_ENABLED)
 	GLManagerANGLE_Windows *gl_manager_angle = nullptr;

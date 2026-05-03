@@ -59,6 +59,8 @@ TEST_CASE("[InputEventMouse] Setting the mouse position works correctly") {
 
 	mousekey.set_position(Vector2{ 10, 10 });
 	CHECK(mousekey.get_position() == Vector2{ 10, 10 });
+	mousekey.set_position(Vector2{ 10.25f, 10.75f });
+	CHECK(mousekey.get_position().is_equal_approx(Vector2{ 10.25f, 10.75f }));
 
 	mousekey.set_position(Vector2{ -1, -1 });
 	CHECK(mousekey.get_position() == Vector2{ -1, -1 });
@@ -70,6 +72,8 @@ TEST_CASE("[InputEventMouse] Setting the global mouse position works correctly")
 	mousekey.set_global_position(Vector2{ 10, 10 });
 	CHECK(mousekey.get_global_position() == Vector2{ 10, 10 });
 	CHECK(mousekey.get_global_position() != Vector2{ 1, 1 });
+	mousekey.set_global_position(Vector2{ 10.25f, 10.75f });
+	CHECK(mousekey.get_global_position().is_equal_approx(Vector2{ 10.25f, 10.75f }));
 
 	mousekey.set_global_position(Vector2{ -1, -1 });
 	CHECK(mousekey.get_global_position() == Vector2{ -1, -1 });

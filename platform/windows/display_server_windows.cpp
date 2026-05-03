@@ -1378,33 +1378,61 @@ typedef struct {
 	int dpi;
 } EnumDpiData;
 
-static int QueryDpiForMonitor(HMONITOR hmon) {
-	int dpiX = 96, dpiY = 96;
+typedef struct {
+	int dpi_x;
+	int dpi_y;
+} MonitorDpiData;
+
+static MonitorDpiData QueryDpiForMonitorXY(HMONITOR hmon) {
+	MonitorDpiData dpi = { 96, 96 };
 
 	UINT x = 0, y = 0;
 	if (hmon) {
 		HRESULT hr = GetDpiForMonitor(hmon, MDT_DEFAULT, &x, &y);
 		if (SUCCEEDED(hr) && (x > 0) && (y > 0)) {
-			dpiX = (int)x;
-			dpiY = (int)y;
+			dpi.dpi_x = (int)x;
+			dpi.dpi_y = (int)y;
 		}
 	} else {
-		static int overallX = 0, overallY = 0;
-		if (overallX <= 0 || overallY <= 0) {
+		static int overall_x = 0;
+		static int overall_y = 0;
+		if (overall_x <= 0 || overall_y <= 0) {
 			HDC hdc = GetDC(nullptr);
 			if (hdc) {
-				overallX = GetDeviceCaps(hdc, LOGPIXELSX);
-				overallY = GetDeviceCaps(hdc, LOGPIXELSY);
+				overall_x = GetDeviceCaps(hdc, LOGPIXELSX);
+				overall_y = GetDeviceCaps(hdc, LOGPIXELSY);
 				ReleaseDC(nullptr, hdc);
 			}
 		}
-		if (overallX > 0 && overallY > 0) {
-			dpiX = overallX;
-			dpiY = overallY;
+		if (overall_x > 0 && overall_y > 0) {
+			dpi.dpi_x = overall_x;
+			dpi.dpi_y = overall_y;
 		}
 	}
 
-	return (dpiX + dpiY) / 2;
+	return dpi;
+}
+
+static int QueryDpiForMonitor(HMONITOR hmon) {
+	MonitorDpiData dpi = QueryDpiForMonitorXY(hmon);
+	return (dpi.dpi_x + dpi.dpi_y) / 2;
+}
+
+static Vector2 _get_winink_pen_client_position(HWND p_hwnd, const POINTER_INFO &p_pointer_info) {
+	POINT client_origin = { 0, 0 };
+	ClientToScreen(p_hwnd, &client_origin);
+
+	HMONITOR monitor = MonitorFromPoint(p_pointer_info.ptPixelLocationRaw, MONITOR_DEFAULTTONEAREST);
+	MonitorDpiData dpi = QueryDpiForMonitorXY(monitor);
+
+	constexpr double HIMETRIC_PER_INCH = 2540.0;
+	const double scale_x = (double)dpi.dpi_x / HIMETRIC_PER_INCH;
+	const double scale_y = (double)dpi.dpi_y / HIMETRIC_PER_INCH;
+
+	Vector2 screen_position(
+			(float)(p_pointer_info.ptHimetricLocationRaw.x * scale_x),
+			(float)(p_pointer_info.ptHimetricLocationRaw.y * scale_y));
+	return screen_position - Vector2(client_origin.x, client_origin.y);
 }
 
 static BOOL CALLBACK _MonitorEnumProcDpi(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
@@ -5232,11 +5260,13 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 			}
 
 			pointer_button[GET_POINTERID_WPARAM(wParam)] = MouseButton::NONE;
+			winink_pen_last_pos.erase(GET_POINTERID_WPARAM(wParam));
 			windows[window_id].block_mm = true;
 			return 0;
 		} break;
 		case WM_POINTERLEAVE: {
 			pointer_button[GET_POINTERID_WPARAM(wParam)] = MouseButton::NONE;
+			winink_pen_last_pos.erase(GET_POINTERID_WPARAM(wParam));
 			windows[window_id].block_mm = false;
 			return 0;
 		} break;
@@ -5259,6 +5289,13 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 			if (pointer_type != PT_PEN) {
 				break;
 			}
+
+			POINTER_PEN_INFO pen_info;
+			if (!GetPointerPenInfo(pointer_id, &pen_info)) {
+				break;
+			}
+
+			Vector2 client_position = _get_winink_pen_client_position(windows[window_id].hWnd, pen_info.pointerInfo);
 
 			Ref<InputEventMouseButton> mb;
 			mb.instantiate();
@@ -5293,14 +5330,14 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 			mb->set_alt_pressed(mods.has_flag(WinKeyModifierMask::ALT));
 			mb->set_meta_pressed(mods.has_flag(WinKeyModifierMask::META));
 
-			POINT coords; // Client coords.
-			coords.x = GET_X_LPARAM(lParam);
-			coords.y = GET_Y_LPARAM(lParam);
+			POINT screen_coords;
+			screen_coords.x = GET_X_LPARAM(lParam);
+			screen_coords.y = GET_Y_LPARAM(lParam);
 
 			// Note: Handle popup closing here, since mouse event is not emulated and hook will not be called.
 			uint64_t delta = OS::get_singleton()->get_ticks_msec() - time_since_popup;
 			if (delta > 250) {
-				Point2i pos = Point2i(coords.x, coords.y) - _get_screens_origin();
+				Point2i pos = Point2i(screen_coords.x, screen_coords.y) - _get_screens_origin();
 				List<WindowID>::Element *C = nullptr;
 				List<WindowID>::Element *E = popup_list.back();
 				// Find top popup to close.
@@ -5326,15 +5363,16 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 			int64_t pen_id = GET_POINTERID_WPARAM(wParam);
 			if (uMsg == WM_POINTERDOWN) {
 				mb->set_pressed(true);
-				if (pointer_down_time.has(pen_id) && (pointer_prev_button[pen_id] == mb->get_button_index()) && (Math::abs(coords.y - pointer_last_pos[pen_id].y) < GetSystemMetrics(SM_CYDOUBLECLK)) && GetMessageTime() - pointer_down_time[pen_id] < (LONG)GetDoubleClickTime()) {
+				if (pointer_down_time.has(pen_id) && (pointer_prev_button[pen_id] == mb->get_button_index()) && (Math::abs(client_position.y - pointer_last_pos[pen_id].y) < GetSystemMetrics(SM_CYDOUBLECLK)) && GetMessageTime() - pointer_down_time[pen_id] < (LONG)GetDoubleClickTime()) {
 					mb->set_double_click(true);
 					pointer_down_time[pen_id] = 0;
 				} else {
 					pointer_down_time[pen_id] = GetMessageTime();
 					pointer_prev_button[pen_id] = mb->get_button_index();
-					pointer_last_pos[pen_id] = Vector2(coords.x, coords.y);
+					pointer_last_pos[pen_id] = client_position;
 				}
 				pointer_button[pen_id] = mb->get_button_index();
+				winink_pen_last_pos[pen_id] = client_position;
 			} else {
 				if (!pointer_button.has(pen_id)) {
 					return 0;
@@ -5344,10 +5382,8 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 				pointer_button[pen_id] = MouseButton::NONE;
 			}
 
-			ScreenToClient(windows[window_id].hWnd, &coords);
-
-			mb->set_position(Vector2(coords.x, coords.y));
-			mb->set_global_position(Vector2(coords.x, coords.y));
+			mb->set_position(client_position);
+			mb->set_global_position(client_position);
 
 			Input::get_singleton()->parse_input_event(mb);
 
@@ -5376,6 +5412,8 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 			if (!GetPointerPenInfo(pointer_id, &pen_info)) {
 				break;
 			}
+
+			Vector2 client_position = _get_winink_pen_client_position(windows[window_id].hWnd, pen_info.pointerInfo);
 
 			if (Input::get_singleton()->is_emulating_mouse_from_touch()) {
 				// Universal translation enabled; ignore OS translation.
@@ -5448,14 +5486,8 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 			}
 			mm->set_button_mask(last_button_state);
 
-			POINT coords; // Client coords.
-			coords.x = GET_X_LPARAM(lParam);
-			coords.y = GET_Y_LPARAM(lParam);
-
-			ScreenToClient(windows[window_id].hWnd, &coords);
-
-			mm->set_position(Vector2(coords.x, coords.y));
-			mm->set_global_position(Vector2(coords.x, coords.y));
+			mm->set_position(client_position);
+			mm->set_global_position(client_position);
 
 			if (mouse_mode == MOUSE_MODE_CAPTURED) {
 				Point2i c(windows[window_id].width / 2, windows[window_id].height / 2);
@@ -5477,16 +5509,13 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 			mm->set_velocity(Input::get_singleton()->get_last_mouse_velocity());
 			mm->set_screen_velocity(mm->get_velocity());
 
-			if (old_invalid) {
-				old_x = mm->get_position().x;
-				old_y = mm->get_position().y;
-				old_invalid = false;
+			if (winink_pen_last_pos.has(pointer_id)) {
+				mm->set_relative(client_position - winink_pen_last_pos[pointer_id]);
+			} else {
+				mm->set_relative(Vector2());
 			}
-
-			mm->set_relative(Vector2(mm->get_position() - Vector2(old_x, old_y)));
 			mm->set_relative_screen_position(mm->get_relative());
-			old_x = mm->get_position().x;
-			old_y = mm->get_position().y;
+			winink_pen_last_pos[pointer_id] = client_position;
 			if (windows[window_id].window_focused || window_get_active_popup() == window_id) {
 				Input::get_singleton()->parse_input_event(mm);
 			}
