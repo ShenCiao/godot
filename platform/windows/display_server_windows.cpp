@@ -95,6 +95,10 @@
 #define DWMWCP_DONOTROUND 1
 #endif
 
+#ifndef WM_POINTERCAPTURECHANGED
+#define WM_POINTERCAPTURECHANGED 0x024C
+#endif
+
 #define WM_INDICATOR_CALLBACK_MESSAGE (WM_USER + 1)
 
 static String format_error_message(DWORD id) {
@@ -4525,6 +4529,8 @@ bool DisplayServerWindows::is_window_transparency_available() const {
 // This one tells whether the event comes from touchscreen (and not from pen).
 #define IsTouchEvent(dw) (IsPenEvent(dw) && ((dw) & 0x80))
 
+static constexpr int TOUCH_MOUSE_EVENT_INDEX = -2;
+
 void DisplayServerWindows::_touch_event(WindowID p_window, bool p_pressed, float p_x, float p_y, int idx) {
 	if (touch_state.has(idx) == p_pressed) {
 		return;
@@ -4561,6 +4567,7 @@ void DisplayServerWindows::_drag_event(WindowID p_window, float p_x, float p_y, 
 	event->set_window_id(p_window);
 	event->set_index(idx);
 	event->set_position(Vector2(p_x, p_y));
+	event->set_pressure(1.0f);
 	event->set_relative(Vector2(p_x, p_y) - curr->get());
 	event->set_relative_screen_position(event->get_relative());
 
@@ -4860,6 +4867,69 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 		// don't let code below operate on incompletely initialized window objects or missing window_id
 		return _handle_early_window_message(hWnd, uMsg, wParam, lParam);
 	}
+
+	auto handle_touch_mouse_message = [&](UINT p_message) {
+		WindowData &window = windows[window_id];
+		LPARAM extra = GetMessageExtraInfo();
+		if (!IsTouchEvent(extra)) {
+			return false;
+		}
+
+		if (tablet_get_current_driver() == "winink") {
+			return true;
+		}
+
+		if ((tablet_get_current_driver() != "wintab") || !wintab_available || !window.wtctx) {
+			return false;
+		}
+
+		const float touch_x = (float)GET_X_LPARAM(lParam);
+		const float touch_y = (float)GET_Y_LPARAM(lParam);
+
+		switch (p_message) {
+			case WM_MOUSEMOVE: {
+				if (touch_state.has(TOUCH_MOUSE_EVENT_INDEX)) {
+					_drag_event(window_id, touch_x, touch_y, TOUCH_MOUSE_EVENT_INDEX);
+				} else if (wParam & MK_LBUTTON) {
+					_touch_event(window_id, true, touch_x, touch_y, TOUCH_MOUSE_EVENT_INDEX);
+				}
+				return true;
+			} break;
+			case WM_LBUTTONDOWN:
+			case WM_LBUTTONDBLCLK: {
+				_touch_event(window_id, true, touch_x, touch_y, TOUCH_MOUSE_EVENT_INDEX);
+				return true;
+			} break;
+			case WM_LBUTTONUP: {
+				_touch_event(window_id, false, touch_x, touch_y, TOUCH_MOUSE_EVENT_INDEX);
+				return true;
+			} break;
+			default: {
+				return false;
+			} break;
+		}
+	};
+
+	auto get_winink_touch_client_position = [&](uint32_t p_pointer_id, Vector2 &r_position) {
+		POINTER_TOUCH_INFO touch_info;
+		if (!GetPointerTouchInfo(p_pointer_id, &touch_info)) {
+			return false;
+		}
+
+		POINT touch_pos = touch_info.pointerInfo.ptPixelLocation;
+		ScreenToClient(hWnd, &touch_pos);
+		r_position = Vector2(touch_pos.x, touch_pos.y);
+		return true;
+	};
+
+	auto release_touch_contact = [&](int p_touch_index) {
+		if (RBMap<int, Vector2>::Element *touch = touch_state.find(p_touch_index)) {
+			const Vector2 touch_position = touch->get();
+			_touch_event(window_id, false, touch_position.x, touch_position.y, p_touch_index);
+			return true;
+		}
+		return false;
+	};
 
 	// Process window messages.
 	switch (uMsg) {
@@ -5303,6 +5373,10 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 				break;
 			}
 
+			if (pointer_type == PT_TOUCH) {
+				return 0;
+			}
+
 			if (pointer_type != PT_PEN) {
 				break;
 			}
@@ -5314,9 +5388,55 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 			return 0;
 		} break;
 		case WM_POINTERLEAVE: {
+			int64_t pointer_id = GET_POINTERID_WPARAM(wParam);
+			if (release_touch_contact(pointer_id)) {
+				return 0;
+			}
+
+			if (tablet_get_current_driver() != "winink") {
+				break;
+			}
+
+			POINTER_INPUT_TYPE pointer_type = PT_POINTER;
+			if (!GetPointerType(pointer_id, &pointer_type)) {
+				break;
+			}
+
+			if (pointer_type != PT_PEN) {
+				return 0;
+			}
+
 			WindowData &window = windows[window_id];
-			pointer_button[GET_POINTERID_WPARAM(wParam)] = MouseButton::NONE;
-			window.pen_state.pointer_positions.erase(GET_POINTERID_WPARAM(wParam));
+			pointer_button[pointer_id] = MouseButton::NONE;
+			window.pen_state.pointer_positions.erase(pointer_id);
+			if (window.pen_state.pointer_positions.is_empty()) {
+				window.pen_state.last_position_valid = false;
+			}
+			windows[window_id].block_mm = false;
+			return 0;
+		} break;
+		case WM_POINTERCAPTURECHANGED: {
+			int64_t pointer_id = GET_POINTERID_WPARAM(wParam);
+			if (release_touch_contact(pointer_id)) {
+				return 0;
+			}
+
+			if (tablet_get_current_driver() != "winink") {
+				break;
+			}
+
+			POINTER_INPUT_TYPE pointer_type = PT_POINTER;
+			if (!GetPointerType(pointer_id, &pointer_type)) {
+				break;
+			}
+
+			if (pointer_type != PT_PEN) {
+				return 0;
+			}
+
+			WindowData &window = windows[window_id];
+			pointer_button[pointer_id] = MouseButton::NONE;
+			window.pen_state.pointer_positions.erase(pointer_id);
 			if (window.pen_state.pointer_positions.is_empty()) {
 				window.pen_state.last_position_valid = false;
 			}
@@ -5337,6 +5457,28 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 			POINTER_INPUT_TYPE pointer_type = PT_POINTER;
 			if (!GetPointerType(pointer_id, &pointer_type)) {
 				break;
+			}
+
+			if (pointer_type == PT_TOUCH) {
+				POINTER_INFO pointer_info;
+				if (GetPointerInfo(pointer_id, &pointer_info) && (pointer_info.pointerFlags & POINTER_FLAG_CANCELED)) {
+					release_touch_contact(pointer_id);
+					return 0;
+				}
+
+				Vector2 client_position;
+				if (uMsg == WM_POINTERUP) {
+					if (RBMap<int, Vector2>::Element *touch = touch_state.find(pointer_id)) {
+						client_position = touch->get();
+					} else if (!get_winink_touch_client_position(pointer_id, client_position)) {
+						return 0;
+					}
+				} else if (!get_winink_touch_client_position(pointer_id, client_position)) {
+					return 0;
+				}
+
+				_touch_event(window_id, uMsg == WM_POINTERDOWN, client_position.x, client_position.y, pointer_id);
+				return 0;
 			}
 
 			if (pointer_type != PT_PEN) {
@@ -5459,6 +5601,22 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 			POINTER_INPUT_TYPE pointer_type = PT_POINTER;
 			if (!GetPointerType(pointer_id, &pointer_type)) {
 				break;
+			}
+
+			if (pointer_type == PT_TOUCH) {
+				POINTER_INFO pointer_info;
+				if (GetPointerInfo(pointer_id, &pointer_info) && (pointer_info.pointerFlags & POINTER_FLAG_CANCELED)) {
+					release_touch_contact(pointer_id);
+					return 0;
+				}
+
+				Vector2 client_position;
+				if (!get_winink_touch_client_position(pointer_id, client_position)) {
+					return 0;
+				}
+
+				_drag_event(window_id, client_position.x, client_position.y, pointer_id);
+				return 0;
 			}
 
 			if (pointer_type != PT_PEN) {
@@ -5589,20 +5747,16 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 			return 0; // Pointer event handled return 0 to avoid duplicate WM_MOUSEMOVE event.
 		} break;
 		case WM_MOUSEMOVE: {
+			if (handle_touch_mouse_message(uMsg)) {
+				return 0;
+			}
+
 			if (windows[window_id].block_mm) {
 				break;
 			}
 
 			if (mouse_mode == MOUSE_MODE_CAPTURED && use_raw_input) {
 				break;
-			}
-
-			if (Input::get_singleton()->is_emulating_mouse_from_touch()) {
-				// Universal translation enabled; ignore OS translation.
-				LPARAM extra = GetMessageExtraInfo();
-				if (IsTouchEvent(extra)) {
-					break;
-				}
 			}
 
 			DisplayServer::WindowID over_id = get_window_at_screen_position(mouse_get_position());
@@ -5723,12 +5877,9 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 		} break;
 		case WM_LBUTTONDOWN:
 		case WM_LBUTTONUP:
-			if (Input::get_singleton()->is_emulating_mouse_from_touch()) {
-				// Universal translation enabled; ignore OS translations for left button.
-				LPARAM extra = GetMessageExtraInfo();
-				if (IsTouchEvent(extra)) {
-					break;
-				}
+		case WM_LBUTTONDBLCLK:
+			if (handle_touch_mouse_message(uMsg)) {
+				return 0;
 			}
 			[[fallthrough]];
 		case WM_MBUTTONDOWN:
@@ -5737,7 +5888,6 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 		case WM_RBUTTONUP:
 		case WM_MOUSEWHEEL:
 		case WM_MOUSEHWHEEL:
-		case WM_LBUTTONDBLCLK:
 		case WM_MBUTTONDBLCLK:
 		case WM_RBUTTONDBLCLK:
 		case WM_XBUTTONDBLCLK:
