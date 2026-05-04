@@ -83,6 +83,8 @@
 
 #define CXO_MESSAGES 0x0004
 #define PK_STATUS 0x0002
+#define PK_X 0x0080
+#define PK_Y 0x0100
 #define PK_NORMAL_PRESSURE 0x0400
 #define PK_TANGENT_PRESSURE 0x0800
 #define PK_ORIENTATION 0x1000
@@ -141,10 +143,17 @@ typedef struct tagORIENTATION {
 
 typedef struct tagPACKET {
 	int pkStatus;
+	LONG pkX;
+	LONG pkY;
 	int pkNormalPressure;
 	int pkTangentPressure;
 	ORIENTATION pkOrientation;
 } PACKET;
+
+typedef struct tagWinInkDeviceMapping {
+	RECT pointer_device_rect;
+	RECT display_rect;
+} WinInkDeviceMapping;
 
 typedef HANDLE(WINAPI *WTOpenPtr)(HWND p_window, LOGCONTEXTW *p_ctx, BOOL p_enable);
 typedef BOOL(WINAPI *WTClosePtr)(HANDLE p_ctx);
@@ -259,9 +268,8 @@ class DisplayServerWindows : public DisplayServer {
 	int key_event_pos;
 
 	bool old_invalid;
-	int old_x, old_y;
+	float old_x, old_y;
 	Point2i center;
-	HashMap<int64_t, Vector2> winink_pen_last_pos;
 
 #if defined(GLES3_ENABLED)
 	GLManagerANGLE_Windows *gl_manager_angle = nullptr;
@@ -333,6 +341,16 @@ class DisplayServerWindows : public DisplayServer {
 		uint32_t move_timer_id = 0U;
 		uint32_t activate_timer_id = 0U;
 
+		struct PenInputState {
+			HashMap<int64_t, Vector2> pointer_positions;
+			Vector2 last_position;
+			bool last_position_valid = false;
+			int pressure_freshness = 0;
+			float pressure = 0.0f;
+			Vector2 tilt;
+			bool inverted = false;
+		} pen_state;
+
 		HANDLE wtctx;
 		LOGCONTEXTW wtlc;
 		int min_pressure;
@@ -340,11 +358,6 @@ class DisplayServerWindows : public DisplayServer {
 		bool tilt_supported;
 		bool pen_inverted = false;
 		bool block_mm = false;
-
-		int last_pressure_update;
-		float last_pressure;
-		Vector2 last_tilt;
-		bool last_pen_inverted = false;
 
 		Size2 min_size;
 		Size2 max_size;
@@ -464,6 +477,8 @@ class DisplayServerWindows : public DisplayServer {
 	HashMap<int64_t, MouseButton> pointer_button;
 	HashMap<int64_t, LONG> pointer_down_time;
 	HashMap<int64_t, Vector2> pointer_last_pos;
+	HashMap<uint64_t, WinInkDeviceMapping> winink_device_mappings;
+	void _open_wintab_context(WindowData &wd);
 
 	void _send_window_event(const WindowData &wd, WindowEvent p_event);
 	void _get_window_style(bool p_main_window, bool p_initialized, bool p_fullscreen, bool p_multiwindow_fs, bool p_borderless, bool p_resizable, bool p_no_min_btn, bool p_no_max_btn, bool p_minimized, bool p_maximized, bool p_maximized_fs, bool p_no_activate_focus, bool p_embed_child, bool p_no_redirection_bitmap, DWORD &r_style, DWORD &r_style_ex);
