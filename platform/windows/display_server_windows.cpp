@@ -1419,20 +1419,35 @@ static int QueryDpiForMonitor(HMONITOR hmon) {
 }
 
 static Vector2 _get_winink_pen_client_position(HWND p_hwnd, const POINTER_INFO &p_pointer_info) {
-	POINT client_origin = { 0, 0 };
-	ClientToScreen(p_hwnd, &client_origin);
+	POINT pixel_position = p_pointer_info.ptPixelLocation;
+	if (!ScreenToClient(p_hwnd, &pixel_position)) {
+		return Vector2();
+	}
 
-	HMONITOR monitor = MonitorFromPoint(p_pointer_info.ptPixelLocationRaw, MONITOR_DEFAULTTONEAREST);
-	MonitorDpiData dpi = QueryDpiForMonitorXY(monitor);
+	Vector2 client_position(pixel_position.x, pixel_position.y);
 
-	constexpr double HIMETRIC_PER_INCH = 2540.0;
-	const double scale_x = (double)dpi.dpi_x / HIMETRIC_PER_INCH;
-	const double scale_y = (double)dpi.dpi_y / HIMETRIC_PER_INCH;
+	RECT pointer_device_rect = {};
+	RECT display_rect = {};
+	if (GetPointerDeviceRects(p_pointer_info.sourceDevice, &pointer_device_rect, &display_rect)) {
+		const double pointer_width = (double)(pointer_device_rect.right - pointer_device_rect.left);
+		const double pointer_height = (double)(pointer_device_rect.bottom - pointer_device_rect.top);
+		const double display_width = (double)(display_rect.right - display_rect.left);
+		const double display_height = (double)(display_rect.bottom - display_rect.top);
 
-	Vector2 screen_position(
-			(float)(p_pointer_info.ptHimetricLocationRaw.x * scale_x),
-			(float)(p_pointer_info.ptHimetricLocationRaw.y * scale_y));
-	return screen_position - Vector2(client_origin.x, client_origin.y);
+		if (pointer_width > 0.0 && pointer_height > 0.0 && display_width > 0.0 && display_height > 0.0) {
+			const Vector2 mapped_screen_position(
+					(float)(display_rect.left + ((double)p_pointer_info.ptHimetricLocation.x - pointer_device_rect.left) * display_width / pointer_width),
+					(float)(display_rect.top + ((double)p_pointer_info.ptHimetricLocation.y - pointer_device_rect.top) * display_height / pointer_height));
+			const Vector2 pixel_anchor((float)p_pointer_info.ptPixelLocation.x, (float)p_pointer_info.ptPixelLocation.y);
+			const Vector2 subpixel_delta = mapped_screen_position - pixel_anchor;
+
+			if (Math::abs(subpixel_delta.x) <= 1.0f && Math::abs(subpixel_delta.y) <= 1.0f) {
+				client_position += subpixel_delta;
+			}
+		}
+	}
+
+	return client_position;
 }
 
 static BOOL CALLBACK _MonitorEnumProcDpi(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
