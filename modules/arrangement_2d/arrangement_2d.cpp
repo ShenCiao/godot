@@ -52,11 +52,11 @@ RID Arrangement2D::create_polyline() {
 	return curve_handle_owner.make_rid({});
 }
 
-TypedArray<RID> Arrangement2D::set_polyline(RID p_id, PackedVector2Array p_data) {
+void Arrangement2D::set_polyline(RID p_id, PackedVector2Array p_data) {
 	CGAL::Curve_handle *ptr = curve_handle_owner.get_or_null(p_id);
 	if (ptr == nullptr) {
 		ERR_PRINT(vformat("Given RID %d is not a polyline.", p_id.get_id()));
-		return {};
+		return;
 	}
 
 	CGAL::Curve_handle curve_handle = *ptr;
@@ -67,34 +67,24 @@ TypedArray<RID> Arrangement2D::set_polyline(RID p_id, PackedVector2Array p_data)
 
 	p_data = remove_consecutive_overlapping_points(p_data);
 	if (p_data.size() < 2) {
-		return {};
+		return;
 	}
 	CGAL::Curve curve = curve_constructor(vector2_to_points(p_data));
 	auto handle = CGAL::insert(arrangement, curve);
 	*ptr = handle;
-
-	// TypedArray<RID> result = invalid_face_rids;
-	// invalid_face_rids = TypedArray<RID>();
-	// return result;
-	return {};
 }
 
-TypedArray<RID> Arrangement2D::remove_polyline(RID p_id) {
+void Arrangement2D::remove_polyline(RID p_id) {
 	CGAL::Curve_handle *ptr = curve_handle_owner.get_or_null(p_id);
 	if (ptr == nullptr) {
 		ERR_PRINT(vformat("Given RID %d is not a polyline.", p_id.get_id()));
-		return {};
+		return;
 	}
 	CGAL::Curve_handle curve_handle = *ptr;
 	curve_handle_owner.free(p_id);
 	if (curve_handle != nullptr) {
 		CGAL::remove_curve(arrangement, curve_handle);
 	}
-
-	// auto result = invalid_face_rids;
-	// invalid_face_rids = TypedArray<RID>();
-	// return result;
-	return {};
 }
 
 RID Arrangement2D::query(Vector2 p_point) {

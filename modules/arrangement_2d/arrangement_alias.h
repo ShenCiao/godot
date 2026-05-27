@@ -3,7 +3,7 @@
 #define CGAL_DISABLE_GMP true
 #define CGAL_DO_NOT_USE_BOOST_MP
 
-#include "custom_arrangement.h"
+#include "custom_arrangement.h" // Custom arrangement with curve history.
 
 #include <CGAL/Arr_batched_point_location.h>
 #include <CGAL/Arr_polyline_traits_2.h>

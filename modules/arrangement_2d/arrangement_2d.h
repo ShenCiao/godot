@@ -24,15 +24,14 @@ public:
 	RID_Owner<CGAL::Curve_handle> curve_handle_owner;
 	RID_Owner<CGAL::Face_const_handle> face_handle_owner;
 	std::unordered_map<CGAL::Face_const_handle, RID> face_handle_to_rid;
-	TypedArray<RID> invalid_face_rids; // Array of face handle RIDs.
 
 	void _notification(int p_what);
 
 	Arrangement2D();
 
 	RID create_polyline();
-	TypedArray<RID> set_polyline(RID p_id, PackedVector2Array p_data); // Returns invalid face RIDs.
-	TypedArray<RID> remove_polyline(RID p_id);
+	void set_polyline(RID p_id, PackedVector2Array p_data); // Returns invalid face RIDs.
+	void remove_polyline(RID p_id);
 
 	RID query(Vector2 p_point);
 	TypedArray<RID> batch_query(PackedVector2Array p_points);
