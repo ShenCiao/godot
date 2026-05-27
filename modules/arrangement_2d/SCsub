@@ -1,0 +1,59 @@
+#!/usr/bin/env python
+
+import os
+import subprocess
+import sys
+
+Import("env")
+Import("env_modules")
+
+env_arrangement_2d = env_modules.Clone()
+
+module_dir = Dir("#modules/arrangement_2d").abspath
+conan_deps = os.path.join(module_dir, "conan_installed", "SConscript_conandeps")
+
+if not os.path.exists(conan_deps):
+    print("Conan dependencies for arrangement_2d not found, installing...")
+    try:
+        result = subprocess.run(["conan", "install", ".", "--build=missing", "--output-folder=conan_installed"], cwd=module_dir)
+    except FileNotFoundError:
+        print("ERROR: Conan is required to build the arrangement_2d module but was not found.", file=sys.stderr)
+        Exit(255)
+
+    if result.returncode != 0:
+        print("ERROR: Failed to install arrangement_2d Conan dependencies.", file=sys.stderr)
+        Exit(result.returncode)
+
+conandeps = SConscript(conan_deps)
+conan_flags = conandeps["conandeps"]
+
+for key in ["CPPPATH", "CPPDEFINES", "CCFLAGS", "CXXFLAGS"]:
+    if key in conan_flags:
+        env_arrangement_2d.Append(**{key: conan_flags[key]})
+
+if env.msvc:
+    env_arrangement_2d.Append(CCFLAGS=["/EHsc"])
+
+if "LIBPATH" in conan_flags:
+    env.Append(LIBPATH=conan_flags["LIBPATH"])
+
+if "LINKFLAGS" in conan_flags:
+    env.Append(LINKFLAGS=conan_flags["LINKFLAGS"])
+
+link_flags = []
+for lib in conan_flags.get("LIBS", []):
+    lib_filename = lib if lib.lower().endswith(".lib") else lib + ".lib"
+    lib_path = None
+    for lib_dir in conan_flags.get("LIBPATH", []):
+        candidate = os.path.join(lib_dir, lib_filename)
+        if os.path.exists(candidate):
+            lib_path = candidate
+            break
+    link_flags.append(lib_path if lib_path else lib_filename)
+
+if link_flags:
+    env.Append(LINKFLAGS=link_flags)
+
+module_obj = []
+env_arrangement_2d.add_source_files(module_obj, "*.cpp")
+env.modules_sources += module_obj
