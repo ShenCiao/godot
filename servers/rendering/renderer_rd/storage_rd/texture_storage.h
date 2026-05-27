@@ -383,6 +383,16 @@ private:
 		RID framebuffer_uniform_set;
 		RID backbuffer_uniform_set;
 
+		struct CanvasGroupBuffer {
+			RID texture;
+			RID framebuffer;
+			RID mipmap0;
+			Vector<RID> mipmaps;
+			RID uniform_set;
+		};
+
+		Vector<CanvasGroupBuffer> canvas_group_buffers;
+
 		RID sdf_buffer_write;
 		RID sdf_buffer_write_fb;
 		RID sdf_buffer_process[2];
@@ -454,6 +464,7 @@ private:
 	void _clear_render_target(RenderTarget *rt);
 	void _update_render_target(RenderTarget *rt);
 	void _create_render_target_backbuffer(RenderTarget *rt);
+	void _create_render_target_canvas_group_buffer(RenderTarget *rt, int p_index);
 	void _render_target_allocate_sdf(RenderTarget *rt);
 	void _render_target_clear_sdf(RenderTarget *rt);
 	Rect2i _render_target_get_sdf_rect(const RenderTarget *rt) const;
@@ -770,6 +781,8 @@ public:
 	void render_target_copy_to_back_buffer(RID p_render_target, const Rect2i &p_region, bool p_gen_mipmaps);
 	void render_target_clear_back_buffer(RID p_render_target, const Rect2i &p_region, const Color &p_color);
 	void render_target_gen_back_buffer_mipmaps(RID p_render_target, const Rect2i &p_region);
+	void render_target_clear_canvas_group_buffer(RID p_render_target, int p_index, const Color &p_color);
+	void render_target_gen_canvas_group_buffer_mipmaps(RID p_render_target, int p_index, const Rect2i &p_region);
 	RID render_target_get_back_buffer_uniform_set(RID p_render_target, RID p_base_shader);
 
 	virtual void render_target_request_clear(RID p_render_target, const Color &p_clear_color) override;
@@ -815,12 +828,16 @@ public:
 	RID render_target_get_rd_texture_msaa(RID p_render_target);
 	RID render_target_get_rd_backbuffer(RID p_render_target);
 	RID render_target_get_rd_backbuffer_framebuffer(RID p_render_target);
+	RID render_target_get_rd_canvas_group_buffer(RID p_render_target, int p_index);
+	RID render_target_get_rd_canvas_group_buffer_framebuffer(RID p_render_target, int p_index);
 
 	RID render_target_get_framebuffer_uniform_set(RID p_render_target);
 	RID render_target_get_backbuffer_uniform_set(RID p_render_target);
+	RID render_target_get_canvas_group_buffer_uniform_set(RID p_render_target, int p_index);
 
 	void render_target_set_framebuffer_uniform_set(RID p_render_target, RID p_uniform_set);
 	void render_target_set_backbuffer_uniform_set(RID p_render_target, RID p_uniform_set);
+	void render_target_set_canvas_group_buffer_uniform_set(RID p_render_target, int p_index, RID p_uniform_set);
 
 	static RD::DataFormat render_target_get_color_format(bool p_use_hdr, bool p_srgb);
 	static uint32_t render_target_get_color_usage_bits(bool p_msaa);

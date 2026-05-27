@@ -3535,6 +3535,13 @@ void TextureStorage::_clear_render_target(RenderTarget *rt) {
 		rt->backbuffer_uniform_set = RID(); //chain deleted
 	}
 
+	for (RenderTarget::CanvasGroupBuffer &buffer : rt->canvas_group_buffers) {
+		if (buffer.texture.is_valid()) {
+			RD::get_singleton()->free_rid(buffer.texture);
+		}
+	}
+	rt->canvas_group_buffers.clear();
+
 	_render_target_clear_sdf(rt);
 
 	rt->color = RID();
@@ -3697,6 +3704,46 @@ void TextureStorage::_create_render_target_backbuffer(RenderTarget *rt) {
 		RD::get_singleton()->set_resource_name(mipmap, "Back Buffer slice mip: " + itos(i));
 
 		rt->backbuffer_mipmaps.push_back(mipmap);
+	}
+}
+
+void TextureStorage::_create_render_target_canvas_group_buffer(RenderTarget *rt, int p_index) {
+	ERR_FAIL_COND(p_index < 0);
+
+	if (p_index >= rt->canvas_group_buffers.size()) {
+		rt->canvas_group_buffers.resize(p_index + 1);
+	}
+
+	RenderTarget::CanvasGroupBuffer &buffer = rt->canvas_group_buffers.write[p_index];
+	if (buffer.texture.is_valid()) {
+		return;
+	}
+
+	uint32_t mipmaps_required = Image::get_image_required_mipmaps(rt->size.width, rt->size.height, Image::FORMAT_RGBA8);
+	RD::TextureFormat tf;
+	tf.format = rt->color_format;
+	tf.width = rt->size.width;
+	tf.height = rt->size.height;
+	tf.texture_type = RD::TEXTURE_TYPE_2D;
+	tf.usage_bits = RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+	tf.mipmaps = mipmaps_required;
+
+	buffer.texture = RD::get_singleton()->texture_create(tf, RD::TextureView());
+	RD::get_singleton()->set_resource_name(buffer.texture, "Canvas Group Buffer");
+	buffer.mipmap0 = RD::get_singleton()->texture_create_shared_from_slice(RD::TextureView(), buffer.texture, 0, 0);
+	RD::get_singleton()->set_resource_name(buffer.mipmap0, "Canvas Group Buffer slice mipmap 0");
+
+	{
+		Vector<RID> fb_tex;
+		fb_tex.push_back(buffer.mipmap0);
+		buffer.framebuffer = RD::get_singleton()->framebuffer_create(fb_tex);
+	}
+
+	for (uint32_t i = 1; i < mipmaps_required; i++) {
+		RID mipmap = RD::get_singleton()->texture_create_shared_from_slice(RD::TextureView(), buffer.texture, 0, i);
+		RD::get_singleton()->set_resource_name(mipmap, "Canvas Group Buffer slice mip: " + itos(i));
+
+		buffer.mipmaps.push_back(mipmap);
 	}
 }
 
@@ -4015,6 +4062,30 @@ RID TextureStorage::render_target_get_rd_backbuffer_framebuffer(RID p_render_tar
 	}
 
 	return rt->backbuffer_fb;
+}
+
+RID TextureStorage::render_target_get_rd_canvas_group_buffer(RID p_render_target, int p_index) {
+	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
+	ERR_FAIL_NULL_V(rt, RID());
+	ERR_FAIL_COND_V(p_index < 0, RID());
+
+	if (p_index >= rt->canvas_group_buffers.size() || !rt->canvas_group_buffers[p_index].texture.is_valid()) {
+		_create_render_target_canvas_group_buffer(rt, p_index);
+	}
+
+	return rt->canvas_group_buffers[p_index].texture;
+}
+
+RID TextureStorage::render_target_get_rd_canvas_group_buffer_framebuffer(RID p_render_target, int p_index) {
+	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
+	ERR_FAIL_NULL_V(rt, RID());
+	ERR_FAIL_COND_V(p_index < 0, RID());
+
+	if (p_index >= rt->canvas_group_buffers.size() || !rt->canvas_group_buffers[p_index].framebuffer.is_valid()) {
+		_create_render_target_canvas_group_buffer(rt, p_index);
+	}
+
+	return rt->canvas_group_buffers[p_index].framebuffer;
 }
 
 void TextureStorage::render_target_request_clear(RID p_render_target, const Color &p_clear_color) {
@@ -4473,6 +4544,74 @@ void TextureStorage::render_target_gen_back_buffer_mipmaps(RID p_render_target, 
 	RD::get_singleton()->draw_command_end_label();
 }
 
+void TextureStorage::render_target_clear_canvas_group_buffer(RID p_render_target, int p_index, const Color &p_color) {
+	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
+	ERR_FAIL_NULL(rt);
+	ERR_FAIL_COND(p_index < 0);
+
+	CopyEffects *copy_effects = CopyEffects::get_singleton();
+	ERR_FAIL_NULL(copy_effects);
+
+	if (p_index >= rt->canvas_group_buffers.size() || !rt->canvas_group_buffers[p_index].texture.is_valid()) {
+		_create_render_target_canvas_group_buffer(rt, p_index);
+	}
+
+	Rect2i region;
+	region.size = rt->size;
+
+	RenderTarget::CanvasGroupBuffer &buffer = rt->canvas_group_buffers.write[p_index];
+	if (RendererSceneRenderRD::get_singleton()->_render_buffers_can_be_storage()) {
+		copy_effects->set_color(buffer.mipmap0, p_color, region, !rt->use_hdr);
+	} else {
+		copy_effects->set_color_raster(buffer.mipmap0, p_color, region);
+	}
+}
+
+void TextureStorage::render_target_gen_canvas_group_buffer_mipmaps(RID p_render_target, int p_index, const Rect2i &p_region) {
+	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
+	ERR_FAIL_NULL(rt);
+	ERR_FAIL_COND(p_index < 0);
+
+	CopyEffects *copy_effects = CopyEffects::get_singleton();
+	ERR_FAIL_NULL(copy_effects);
+
+	if (p_index >= rt->canvas_group_buffers.size() || !rt->canvas_group_buffers[p_index].texture.is_valid()) {
+		_create_render_target_canvas_group_buffer(rt, p_index);
+	}
+
+	Rect2i region;
+	if (p_region == Rect2i()) {
+		region.size = rt->size;
+	} else {
+		region = Rect2i(Size2i(), rt->size).intersection(p_region);
+		if (region.size == Size2i()) {
+			return;
+		}
+	}
+
+	RenderTarget::CanvasGroupBuffer &buffer = rt->canvas_group_buffers.write[p_index];
+	RD::get_singleton()->draw_command_begin_label("Canvas Group Buffer Mipmaps");
+	RID prev_texture = buffer.mipmap0;
+	Size2i texture_size = rt->size;
+
+	for (int i = 0; i < buffer.mipmaps.size(); i++) {
+		region.position.x >>= 1;
+		region.position.y >>= 1;
+		region.size = Size2i(region.size.x >> 1, region.size.y >> 1).maxi(1);
+		texture_size = Size2i(texture_size.x >> 1, texture_size.y >> 1).maxi(1);
+
+		RID mipmap = buffer.mipmaps[i];
+
+		if (RendererSceneRenderRD::get_singleton()->_render_buffers_can_be_storage()) {
+			copy_effects->gaussian_blur(prev_texture, mipmap, region, texture_size, !rt->use_hdr);
+		} else {
+			copy_effects->gaussian_blur_raster(prev_texture, mipmap, region, texture_size);
+		}
+		prev_texture = mipmap;
+	}
+	RD::get_singleton()->draw_command_end_label();
+}
+
 RID TextureStorage::render_target_get_framebuffer_uniform_set(RID p_render_target) {
 	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
 	ERR_FAIL_NULL_V(rt, RID());
@@ -4482,6 +4621,16 @@ RID TextureStorage::render_target_get_backbuffer_uniform_set(RID p_render_target
 	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
 	ERR_FAIL_NULL_V(rt, RID());
 	return rt->backbuffer_uniform_set;
+}
+
+RID TextureStorage::render_target_get_canvas_group_buffer_uniform_set(RID p_render_target, int p_index) {
+	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
+	ERR_FAIL_NULL_V(rt, RID());
+	ERR_FAIL_COND_V(p_index < 0, RID());
+	if (p_index >= rt->canvas_group_buffers.size()) {
+		return RID();
+	}
+	return rt->canvas_group_buffers[p_index].uniform_set;
 }
 
 void TextureStorage::render_target_set_framebuffer_uniform_set(RID p_render_target, RID p_uniform_set) {
@@ -4494,6 +4643,16 @@ void TextureStorage::render_target_set_backbuffer_uniform_set(RID p_render_targe
 	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
 	ERR_FAIL_NULL(rt);
 	rt->backbuffer_uniform_set = p_uniform_set;
+}
+
+void TextureStorage::render_target_set_canvas_group_buffer_uniform_set(RID p_render_target, int p_index, RID p_uniform_set) {
+	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
+	ERR_FAIL_NULL(rt);
+	ERR_FAIL_COND(p_index < 0);
+	if (p_index >= rt->canvas_group_buffers.size()) {
+		rt->canvas_group_buffers.resize(p_index + 1);
+	}
+	rt->canvas_group_buffers.write[p_index].uniform_set = p_uniform_set;
 }
 
 void TextureStorage::render_target_set_vrs_mode(RID p_render_target, RS::ViewportVRSMode p_mode) {

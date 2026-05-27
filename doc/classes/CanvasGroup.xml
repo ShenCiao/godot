@@ -22,7 +22,8 @@
 			COLOR *= c;
 		}
 		[/codeblock]
-		[b]Note:[/b] Since [CanvasGroup] and [member CanvasItem.clip_children] both utilize the backbuffer, children of a [CanvasGroup] who have their [member CanvasItem.clip_children] set to anything other than [constant CanvasItem.CLIP_CHILDREN_DISABLED] will not function correctly.
+		[b]Note:[/b] When using a RenderingDevice-based renderer, [CanvasGroup] nodes can be nested. Nested [CanvasGroup] nodes are rendered from the innermost group outward, similar to nested layer groups in image editing applications. This is not supported by the Compatibility renderer.
+		[b]Note:[/b] Since [CanvasGroup] and [member CanvasItem.clip_children] both utilize offscreen buffers, children of a [CanvasGroup] who have their [member CanvasItem.clip_children] set to anything other than [constant CanvasItem.CLIP_CHILDREN_DISABLED] will not function correctly.
 	</description>
 	<tutorials>
 	</tutorials>

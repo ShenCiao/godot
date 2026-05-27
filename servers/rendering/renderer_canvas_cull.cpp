@@ -189,6 +189,8 @@ void RendererCanvasCull::_mark_ysort_dirty(RendererCanvasCull::Item *ysort_owner
 }
 
 void RendererCanvasCull::_attach_canvas_item_for_draw(RendererCanvasCull::Item *ci, RendererCanvasCull::Item *p_canvas_clip, RendererCanvasRender::Item **r_z_list, RendererCanvasRender::Item **r_z_last_list, const Transform2D &p_transform, const Rect2 &p_clip_rect, Rect2 p_global_rect, const Color &p_modulate, int p_z, RendererCanvasCull::Item *p_material_owner, bool p_use_canvas_group, RendererCanvasRender::Item *r_canvas_group_from) {
+	ci->canvas_group_owners.clear();
+
 	if (ci->copy_back_buffer) {
 		ci->copy_back_buffer->screen_rect = p_transform.xform(ci->copy_back_buffer->rect).intersection(p_clip_rect);
 	}
@@ -253,6 +255,9 @@ void RendererCanvasCull::_attach_canvas_item_for_draw(RendererCanvasCull::Item *
 			// Very important that this is cleared after used in RendererCanvasRender to avoid
 			// potential crashes.
 			r_canvas_group_from->canvas_group_owner = ci;
+			if (ci->canvas_group->mode == RS::CANVAS_GROUP_MODE_TRANSPARENT) {
+				r_canvas_group_from->canvas_group_owners.push_back(ci);
+			}
 		}
 	}
 

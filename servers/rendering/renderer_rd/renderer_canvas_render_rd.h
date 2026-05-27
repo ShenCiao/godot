@@ -659,6 +659,8 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 	RS::CanvasItemTextureRepeat default_repeat = RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED;
 
 	RID _create_base_uniform_set(RID p_to_render_target, bool p_backbuffer);
+	RID _create_base_uniform_set(RID p_to_render_target, RID p_screen_texture);
+	RID _ensure_canvas_group_buffer_uniform_set(RID p_to_render_target, int p_index);
 
 	bool debug_redraw = false;
 	Color debug_redraw_color;
@@ -669,6 +671,10 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 		// Current render target for the canvas.
 		RID render_target;
 		bool use_linear_colors = false;
+		RID framebuffer;
+		RID base_uniform_set;
+		RID screen_texture;
+		bool use_render_target_clear = true;
 	};
 
 	inline RID _get_pipeline_specialization_or_ubershader(CanvasShaderData *p_shader_data, PipelineKey &r_pipeline_key, PushConstant &r_push_constant, RID p_mesh_instance = RID(), void *p_surface = nullptr, uint32_t p_surface_index = 0, RID *r_vertex_array = nullptr);

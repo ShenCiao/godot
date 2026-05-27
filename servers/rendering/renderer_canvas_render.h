@@ -360,6 +360,7 @@ public:
 		Item *final_clip_owner = nullptr;
 		Item *material_owner = nullptr;
 		Item *canvas_group_owner = nullptr;
+		Vector<Item *> canvas_group_owners;
 		ViewportRender *vp_render = nullptr;
 		bool distance_field;
 		bool light_masked;
@@ -471,6 +472,7 @@ public:
 			next = nullptr;
 			final_clip_owner = nullptr;
 			canvas_group_owner = nullptr;
+			canvas_group_owners.clear();
 			clip = false;
 			final_modulate = Color(1, 1, 1, 1);
 			visible = true;
