@@ -675,6 +675,8 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 		RID base_uniform_set;
 		RID screen_texture;
 		bool use_render_target_clear = true;
+		bool clear_requested = false;
+		Color clear_color;
 	};
 
 	inline RID _get_pipeline_specialization_or_ubershader(CanvasShaderData *p_shader_data, PipelineKey &r_pipeline_key, PushConstant &r_push_constant, RID p_mesh_instance = RID(), void *p_surface = nullptr, uint32_t p_surface_index = 0, RID *r_vertex_array = nullptr);

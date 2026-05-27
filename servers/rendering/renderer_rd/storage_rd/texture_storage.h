@@ -781,7 +781,6 @@ public:
 	void render_target_copy_to_back_buffer(RID p_render_target, const Rect2i &p_region, bool p_gen_mipmaps);
 	void render_target_clear_back_buffer(RID p_render_target, const Rect2i &p_region, const Color &p_color);
 	void render_target_gen_back_buffer_mipmaps(RID p_render_target, const Rect2i &p_region);
-	void render_target_clear_canvas_group_buffer(RID p_render_target, int p_index, const Color &p_color);
 	void render_target_gen_canvas_group_buffer_mipmaps(RID p_render_target, int p_index, const Rect2i &p_region);
 	RID render_target_get_back_buffer_uniform_set(RID p_render_target, RID p_base_shader);
 

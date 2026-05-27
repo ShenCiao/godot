@@ -4544,29 +4544,6 @@ void TextureStorage::render_target_gen_back_buffer_mipmaps(RID p_render_target, 
 	RD::get_singleton()->draw_command_end_label();
 }
 
-void TextureStorage::render_target_clear_canvas_group_buffer(RID p_render_target, int p_index, const Color &p_color) {
-	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
-	ERR_FAIL_NULL(rt);
-	ERR_FAIL_COND(p_index < 0);
-
-	CopyEffects *copy_effects = CopyEffects::get_singleton();
-	ERR_FAIL_NULL(copy_effects);
-
-	if (p_index >= rt->canvas_group_buffers.size() || !rt->canvas_group_buffers[p_index].texture.is_valid()) {
-		_create_render_target_canvas_group_buffer(rt, p_index);
-	}
-
-	Rect2i region;
-	region.size = rt->size;
-
-	RenderTarget::CanvasGroupBuffer &buffer = rt->canvas_group_buffers.write[p_index];
-	if (RendererSceneRenderRD::get_singleton()->_render_buffers_can_be_storage()) {
-		copy_effects->set_color(buffer.mipmap0, p_color, region, !rt->use_hdr);
-	} else {
-		copy_effects->set_color_raster(buffer.mipmap0, p_color, region);
-	}
-}
-
 void TextureStorage::render_target_gen_canvas_group_buffer_mipmaps(RID p_render_target, int p_index, const Rect2i &p_region) {
 	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
 	ERR_FAIL_NULL(rt);
