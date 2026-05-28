@@ -4530,10 +4530,10 @@
 		<constant name="ARRAY_WEIGHTS_SIZE" value="4">
 			Number of weights/bones per vertex.
 		</constant>
-		<constant name="CANVAS_ITEM_Z_MIN" value="-4096">
+		<constant name="CANVAS_ITEM_Z_MIN" value="-128">
 			The minimum Z-layer for canvas items.
 		</constant>
-		<constant name="CANVAS_ITEM_Z_MAX" value="4096">
+		<constant name="CANVAS_ITEM_Z_MAX" value="127">
 			The maximum Z-layer for canvas items.
 		</constant>
 		<constant name="CANVAS_LAYER_MIN" value="-2147483648">
