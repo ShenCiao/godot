@@ -33,6 +33,24 @@
 #include "core/math/geometry_2d.h"
 #include "skeleton_2d.h"
 
+static void _append_triangle_indices(Vector<int> &r_indices, int p_a, int p_b, int p_c, const Vector<Vector2> &p_points) {
+	const Vector2 *points = p_points.ptr();
+	const real_t area = (points[p_b] - points[p_a]).cross(points[p_c] - points[p_a]);
+
+	const int bic = r_indices.size();
+	r_indices.resize(bic + 3);
+	int *w = r_indices.ptrw();
+	if (area > 0.0f) {
+		w[bic + 0] = p_c;
+		w[bic + 1] = p_a;
+		w[bic + 2] = p_b;
+	} else {
+		w[bic + 0] = p_a;
+		w[bic + 1] = p_c;
+		w[bic + 2] = p_b;
+	}
+}
+
 #ifndef NAVIGATION_2D_DISABLED
 #include "scene/resources/2d/navigation_mesh_source_geometry_data_2d.h"
 #include "scene/resources/2d/navigation_polygon.h"
@@ -321,7 +339,11 @@ void Polygon2D::_notification(int p_what) {
 			Vector<int> index_array;
 
 			if (invert || polygons.is_empty()) {
-				index_array = Geometry2D::triangulate_polygon(points);
+				if (points.size() == 3) {
+					_append_triangle_indices(index_array, 0, 1, 2, points);
+				} else {
+					index_array = Geometry2D::triangulate_polygon(points);
+				}
 			} else {
 				//draw individual polygons
 				for (int i = 0; i < polygons.size(); i++) {
@@ -331,6 +353,21 @@ void Polygon2D::_notification(int p_what) {
 						continue;
 					}
 					const int *r = src_indices.ptr();
+
+					if (ic == 3) {
+						bool indices_are_valid = true;
+						for (int j = 0; j < ic; j++) {
+							int idx = r[j];
+							if (idx < 0 || idx >= points.size()) {
+								indices_are_valid = false;
+								break;
+							}
+						}
+						ERR_CONTINUE(!indices_are_valid);
+
+						_append_triangle_indices(index_array, r[0], r[1], r[2], points);
+						continue;
+					}
 
 					Vector<Vector2> tmp_points;
 					tmp_points.resize(ic);
