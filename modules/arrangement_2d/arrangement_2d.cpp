@@ -10,9 +10,9 @@
 #include "core/string/ustring.h"
 
 #include <algorithm>
-#include <deque>
 #include <iterator>
 #include <list>
+#include <map>
 #include <set>
 #include <variant>
 
@@ -24,13 +24,13 @@ void Arrangement2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("polyline_query", "polyline"), &Arrangement2D::polyline_query);
 	ClassDB::bind_method(D_METHOD("batch_query", "points"), &Arrangement2D::batch_query);
 	ClassDB::bind_method(D_METHOD("get_polygon", "face_id"), &Arrangement2D::get_polygon);
+	ClassDB::bind_method(D_METHOD("get_triangles", "face_id"), &Arrangement2D::get_triangles);
 	ClassDB::bind_method(D_METHOD("is_unbounded_face", "id"), &Arrangement2D::is_unbounded_face);
 	ClassDB::bind_method(D_METHOD("get_unbounded_face"), &Arrangement2D::get_unbounded_face);
+	ClassDB::bind_static_method("Arrangement2D", D_METHOD("repair_and_triangulate", "polygons"), &Arrangement2D::repair_and_triangulate);
 }
 
 void Arrangement2D::_notification(int p_what) {
-	// CGAL::Arrangement::Halfedge_handle he;
-	// auto x = he->source();
 	if (p_what == NOTIFICATION_PREDELETE) {
 		LocalVector<RID> rids = curve_handle_owner.get_owned_list();
 		for (const RID &id : rids) {
@@ -192,6 +192,20 @@ TypedArray<PackedVector2Array> Arrangement2D::get_polygon(RID p_id) {
 	return face_to_polygons(handle);
 }
 
+Dictionary Arrangement2D::get_triangles(RID p_id) {
+	if (!p_id.is_valid() || !face_handle_owner.owns(p_id)) {
+		return make_triangle_result();
+	}
+
+	CGAL::Face_const_handle handle = *face_handle_owner.get_or_null(p_id);
+	if (handle->is_unbounded()) {
+		return make_triangle_result();
+	}
+
+	// Face rings can include hole CCBs and zero-width artifacts, so triangulation must run after repair.
+	return triangulate(repair_polygons(face_to_raw_polygons(handle)));
+}
+
 bool Arrangement2D::is_unbounded_face(RID p_id) {
 	if (!p_id.is_valid()) {
 		return false;
@@ -202,6 +216,10 @@ bool Arrangement2D::is_unbounded_face(RID p_id) {
 	}
 	CGAL::Face_const_handle handle = *face_handle_owner.get_or_null(p_id);
 	return handle->is_unbounded();
+}
+
+Dictionary Arrangement2D::repair_and_triangulate(TypedArray<PackedVector2Array> p_polygons) {
+	return triangulate(repair_polygons(packed_to_polygons(p_polygons)));
 }
 
 PackedVector2Array Arrangement2D::remove_consecutive_overlapping_points(PackedVector2Array p_polyline) {
@@ -224,121 +242,192 @@ std::vector<CGAL::Point> Arrangement2D::vector2_to_points(PackedVector2Array p_p
 	}
 	return points;
 }
-/// <remarks>
-/// If a line is inserted(pierced) into a face but not across it, CGAL will return vertices associated with this line.
-/// Need to eliminate this pattern with palindromic detection.
-/// </remarks>
-/// <remarks>
-/// If the face has holes, they could be bestring-of-beads-shaped, remove their bridge/string lines to create multiple polygons
-/// </remarks>
-TypedArray<PackedVector2Array> Arrangement2D::face_to_polygons(CGAL::Face_const_handle p_face) {
+
+CGAL::Polygon2 Arrangement2D::packed_to_polygon(const PackedVector2Array &p_polygon) {
+	CGAL::Polygon2 polygon{};
+	polygon.reserve(p_polygon.size());
+
+	for (Vector2 point : p_polygon) {
+		CGAL::Point cgal_point(point.x, point.y);
+		if (polygon.size() > 0 && polygon.container().back() == cgal_point) {
+			continue;
+		}
+		polygon.push_back(cgal_point);
+	}
+	if (polygon.size() > 1 && polygon.container().front() == polygon.container().back()) {
+		polygon.container().pop_back();
+	}
+	return polygon;
+}
+
+std::vector<CGAL::Polygon2> Arrangement2D::packed_to_polygons(TypedArray<PackedVector2Array> p_polygons) {
+	std::vector<CGAL::Polygon2> polygons{};
+	polygons.reserve(p_polygons.size());
+
+	for (int i = 0; i < p_polygons.size(); i++) {
+		CGAL::Polygon2 polygon = packed_to_polygon(p_polygons[i]);
+		if (polygon.size() >= 3) {
+			polygons.push_back(std::move(polygon));
+		}
+	}
+	return polygons;
+}
+
+PackedVector2Array Arrangement2D::polygon_to_packed(const CGAL::Polygon2 &p_polygon) {
+	PackedVector2Array result{};
+	result.resize(p_polygon.size());
+
+	Vector2 *write = result.ptrw();
+	int index = 0;
+	for (const CGAL::Point &point : p_polygon.vertices()) {
+		write[index++] = {
+			static_cast<float>(CGAL::to_double(point.x())),
+			static_cast<float>(CGAL::to_double(point.y()))
+		};
+	}
+	return result;
+}
+
+std::vector<CGAL::Polygon2> Arrangement2D::face_to_raw_polygons(CGAL::Face_const_handle p_face) {
 	std::vector<CGAL::Arrangement::Ccb_halfedge_const_circulator> ccb_circulators{};
 	if (!p_face->is_unbounded()) {
 		ccb_circulators.push_back(p_face->outer_ccb());
 	}
+	// Keep hole CCBs in the same ring set as the outer CCB. We do not tag holes here;
+	// CGAL's even-odd repair below reconstructs nested rings as holes.
 	for (auto hole_it = p_face->holes_begin(); hole_it != p_face->holes_end(); ++hole_it) {
 		CGAL::Arrangement::Ccb_halfedge_const_circulator hole_ccb = *hole_it;
 		ccb_circulators.push_back(hole_ccb);
 	}
 
-	TypedArray<PackedVector2Array> result{};
-	for (auto ccb : ccb_circulators) {
-		// Remove palindromic halfedges.
-		auto curr = ccb;
+	std::vector<CGAL::Polygon2> result{};
+	result.reserve(ccb_circulators.size());
 
-		std::deque<CGAL::Halfedge_const_handle> halfedges{};
+	for (auto ccb : ccb_circulators) {
+		auto curr = ccb;
+		CGAL::Polygon2 polygon{};
+
 		do {
-			if (!halfedges.empty() && halfedges.back() == curr->twin()) {
-				halfedges.pop_back();
-			} else if (!halfedges.empty() && halfedges.front() == curr->twin()) {
-				halfedges.pop_front();
+			// Points in halfedge->curve() are always in x-mono increasing order, which may not match source-to-target order.
+			auto begin_it = curr->curve().points_begin();
+			auto end_it = curr->curve().points_end();
+			auto last_it = end_it;
+			--last_it;
+
+			if (curr->source()->point() == *begin_it) {
+				for (auto it = begin_it; it != last_it; ++it) {
+					if (polygon.size() == 0 || polygon.container().back() != *it) {
+						polygon.push_back(*it);
+					}
+				}
 			} else {
-				halfedges.push_back(curr);
+				for (auto it = last_it; it != begin_it; --it) {
+					if (polygon.size() == 0 || polygon.container().back() != *it) {
+						polygon.push_back(*it);
+					}
+				}
 			}
 		} while (++curr != ccb);
 
-		if (halfedges.empty()) {
-			continue;
+		if (polygon.size() > 1 && polygon.container().front() == polygon.container().back()) {
+			polygon.container().pop_back();
 		}
-
-		// Remove bridges in multi-bulbed gourd-like shape
-		// twin_set: contains the twins of all halfedges in the CCB.
-		// If twin_set contains 'he', it means he->twin() is also in the CCB, so 'he' is a bridge halfedge.
-		std::set<CGAL::Halfedge_const_handle> twin_set{};
-		for (auto halfedge : halfedges)
-		{
-			twin_set.insert(halfedge->twin());
+		if (polygon.size() >= 3) {
+			result.push_back(std::move(polygon));
 		}
+	}
+	return result;
+}
 
-		std::vector<CGAL::Halfedge_const_handle> polygon_stack{};
-		std::vector<std::vector<CGAL::Halfedge_const_handle>> polygon_groups{};
-		std::vector<CGAL::Halfedge_const_handle> bridge_stack{};
+CGAL::MultipolygonWithHoles2 Arrangement2D::repair_polygons(std::vector<CGAL::Polygon2> p_polygons) {
+	CGAL::MultipolygonWithHoles2 multipolygon{};
+	for (CGAL::Polygon2 &polygon : p_polygons) {
+		multipolygon.add_polygon(std::move(polygon));
+	}
+	// The default repair rule is even-odd: nested rings become holes, while spike/bridge
+	// artifacts collapse before we export polygons or triangulate.
+	return CGAL::Polygon_repair::repair(multipolygon);
+}
 
-		for (auto halfedge : halfedges) {
-			if (twin_set.find(halfedge) != twin_set.end()) {
-				if (!bridge_stack.empty() && bridge_stack.back() == halfedge->twin()) {
-					polygon_groups.emplace_back();
-					while (polygon_stack.back() != bridge_stack.back()) {
-						polygon_groups.back().push_back(polygon_stack.back());
-						polygon_stack.pop_back();
-					}
-					polygon_stack.pop_back(); // remove the bridge opener
-					if (polygon_groups.back().empty()) {
-						polygon_groups.pop_back();
-					} else {
-						std::reverse(polygon_groups.back().begin(), polygon_groups.back().end());
-					}
+TypedArray<PackedVector2Array> Arrangement2D::face_to_polygons(CGAL::Face_const_handle p_face) {
+	return multipolygon_to_packed_polygons(repair_polygons(face_to_raw_polygons(p_face)));
+}
 
-					bridge_stack.pop_back();
-				} else {
-					polygon_stack.push_back(halfedge);
-					bridge_stack.push_back(halfedge);
-				}
-
-			} else {
-				polygon_stack.push_back(halfedge);
-			}
+TypedArray<PackedVector2Array> Arrangement2D::multipolygon_to_packed_polygons(const CGAL::MultipolygonWithHoles2 &p_multipolygon) {
+	TypedArray<PackedVector2Array> result{};
+	for (const CGAL::PolygonWithHoles2 &polygon_with_holes : p_multipolygon.polygons_with_holes()) {
+		// Repair has made hole topology explicit again; the script API still exposes flat rings.
+		PackedVector2Array outer_boundary = polygon_to_packed(polygon_with_holes.outer_boundary());
+		if (!outer_boundary.is_empty()) {
+			result.push_back(outer_boundary);
 		}
-		polygon_groups.push_back(std::move(polygon_stack));
-
-		// Get the points from halfedges.
-		for (auto &group : polygon_groups) {
-			PackedVector2Array polygon = {};
-			for (auto &halfedge : group) {
-				// Points in halfedge->curve() is always in x-mono increasing order, may not begin from source and end to target, so we need to reverse some of them.
-				// halfedge->source()->point() is the start point of the polyline
-				// halfedge->target()->point() is the end point of the polyline
-				// halfedge->curve().points_begin() can be both source or target
-
-				// Cannot use `halfedge->curve().points_end() - 1`; use --halfedge->curve().points_end().
-				auto begin_it = halfedge->curve().points_begin();
-
-				if (halfedge->source()->point() == *begin_it) {
-					for (auto it = begin_it; it != --halfedge->curve().points_end(); ++it) {
-						Vector2 vec{
-							static_cast<float>(CGAL::to_double(it->x())),
-							static_cast<float>(CGAL::to_double(it->y()))
-						};
-						polygon.push_back(vec);
-					}
-				} else {
-					// reverse iteration
-					for (auto it = --halfedge->curve().points_end(); it != begin_it; --it) {
-						Vector2 vec{
-							static_cast<float>(CGAL::to_double(it->x())),
-							static_cast<float>(CGAL::to_double(it->y())) };
-						polygon.push_back(vec);
-					}
-				}
-			}
-
-			// Remove consecutive duplicate points caused by float precision loss
-			auto deduped = remove_consecutive_overlapping_points(polygon);
-			if (!deduped.is_empty()) {
-				result.push_back(deduped);
+		for (auto hole_it = polygon_with_holes.holes_begin(); hole_it != polygon_with_holes.holes_end(); ++hole_it) {
+			PackedVector2Array hole = polygon_to_packed(*hole_it);
+			if (!hole.is_empty()) {
+				result.push_back(hole);
 			}
 		}
 	}
+	return result;
+}
+
+Dictionary Arrangement2D::triangulate(const CGAL::MultipolygonWithHoles2 &p_multipolygon) {
+	CGAL::ConstrainedDelaunayTriangulation2 triangulation{};
+
+	for (const CGAL::PolygonWithHoles2 &polygon_with_holes : p_multipolygon.polygons_with_holes()) {
+		const CGAL::Polygon2 &outer_boundary = polygon_with_holes.outer_boundary();
+		triangulation.insert_constraint(outer_boundary.vertices_begin(), outer_boundary.vertices_end(), true);
+
+		// Holes are inserted as constraints too; domain marking later excludes their interior.
+		for (auto hole_it = polygon_with_holes.holes_begin(); hole_it != polygon_with_holes.holes_end(); ++hole_it) {
+			triangulation.insert_constraint(hole_it->vertices_begin(), hole_it->vertices_end(), true);
+		}
+	}
+
+	if (triangulation.dimension() < 2 || triangulation.number_of_faces() == 0) {
+		return make_triangle_result();
+	}
+
+	// mark_domain_in_triangulation treats odd nesting levels as inside the domain.
+	CGAL::mark_domain_in_triangulation(triangulation);
+
+	std::map<CGAL::ConstrainedDelaunayTriangulation2::Vertex_handle, int> vertex_indices{};
+	PackedVector2Array vertices{};
+	PackedInt32Array indices{};
+
+	auto add_vertex = [&](CGAL::ConstrainedDelaunayTriangulation2::Vertex_handle p_vertex) {
+		auto it = vertex_indices.find(p_vertex);
+		if (it != vertex_indices.end()) {
+			return it->second;
+		}
+
+		const CGAL::Point &point = p_vertex->point();
+		int index = vertices.size();
+		vertices.push_back({
+			static_cast<float>(CGAL::to_double(point.x())),
+			static_cast<float>(CGAL::to_double(point.y()))
+		});
+		vertex_indices[p_vertex] = index;
+		return index;
+	};
+
+	for (auto face_it = triangulation.finite_faces_begin(); face_it != triangulation.finite_faces_end(); ++face_it) {
+		if (!face_it->is_in_domain()) {
+			continue;
+		}
+
+		indices.push_back(add_vertex(face_it->vertex(0)));
+		indices.push_back(add_vertex(face_it->vertex(1)));
+		indices.push_back(add_vertex(face_it->vertex(2)));
+	}
+
+	return make_triangle_result(vertices, indices);
+}
+
+Dictionary Arrangement2D::make_triangle_result(PackedVector2Array p_vertices, PackedInt32Array p_indices) {
+	Dictionary result{};
+	result["vertices"] = p_vertices;
+	result["indices"] = p_indices;
 	return result;
 }
 
