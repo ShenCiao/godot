@@ -856,13 +856,14 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 
 		RenderTarget composite_target = get_current_render_target();
 		composite_target.clear_requested = false;
-		composite_target.screen_texture = texture_storage->render_target_get_rd_canvas_group_buffer(p_to_render_target, buffer_index);
-		composite_target.base_uniform_set = _ensure_canvas_group_buffer_uniform_set(p_to_render_target, buffer_index);
+		RID group_texture = texture_storage->render_target_get_rd_canvas_group_buffer(p_to_render_target, buffer_index);
 
+		p_owner->canvas_group_texture = group_texture;
 		p_owner->use_canvas_group = true;
 		items[item_count++] = p_owner;
 		flush_render_items(composite_target);
 		p_owner->use_canvas_group = false;
+		p_owner->canvas_group_texture = RID();
 	};
 
 	while (ci) {
@@ -1600,7 +1601,7 @@ void RendererCanvasRenderRD::CanvasShaderData::_create_pipeline(PipelineKey p_pi
 			"LCD:", p_pipeline_key.lcd_blend);
 #endif
 
-	RendererRD::MaterialStorage::ShaderData::BlendMode blend_mode_rd = RendererRD::MaterialStorage::ShaderData::BlendMode(blend_mode);
+	RendererRD::MaterialStorage::ShaderData::BlendMode blend_mode_rd = p_pipeline_key.premul_blend ? RendererRD::MaterialStorage::ShaderData::BLEND_MODE_PREMULTIPLIED_ALPHA : RendererRD::MaterialStorage::ShaderData::BlendMode(blend_mode);
 	RD::PipelineColorBlendState blend_state;
 	RD::PipelineColorBlendState::Attachment attachment;
 	uint32_t dynamic_state_flags = 0;
@@ -2167,34 +2168,6 @@ RendererCanvasRenderRD::RendererCanvasRenderRD() {
 	state.time = 0;
 
 	{
-		default_canvas_group_shader = material_storage->shader_allocate();
-		material_storage->shader_initialize(default_canvas_group_shader);
-
-		material_storage->shader_set_code(default_canvas_group_shader, R"(
-// Default CanvasGroup shader.
-
-shader_type canvas_item;
-render_mode unshaded;
-
-uniform sampler2D screen_texture : hint_screen_texture, repeat_disable, filter_nearest;
-
-void fragment() {
-	vec4 c = textureLod(screen_texture, SCREEN_UV, 0.0);
-
-	if (c.a > 0.0001) {
-		c.rgb /= c.a;
-	}
-
-	COLOR *= c;
-}
-)");
-		default_canvas_group_material = material_storage->material_allocate();
-		material_storage->material_initialize(default_canvas_group_material);
-
-		material_storage->material_set_shader(default_canvas_group_material, default_canvas_group_shader);
-	}
-
-	{
 		default_clip_children_shader = material_storage->shader_allocate();
 		material_storage->shader_initialize(default_clip_children_shader);
 
@@ -2312,8 +2285,6 @@ void RendererCanvasRenderRD::_render_batch_items(RenderTarget p_to_render_target
 					if (material.is_null()) {
 						if (ci->canvas_group->mode == RS::CANVAS_GROUP_MODE_CLIP_ONLY) {
 							material = default_clip_children_material;
-						} else {
-							material = default_canvas_group_material;
 						}
 					}
 				}
@@ -2532,6 +2503,43 @@ void RendererCanvasRenderRD::_record_item_commands(const Item *p_item, RenderTar
 		switch (c->type) {
 			case Item::Command::TYPE_RECT: {
 				const Item::CommandRect *rect = static_cast<const Item::CommandRect *>(c);
+				RID rect_texture = rect->texture;
+				Rect2 rect_source = rect->source;
+				uint16_t rect_flags = rect->flags;
+				Size2i direct_texture_size;
+				bool direct_rd_texture = false;
+				bool use_premul_blend = false;
+				RS::CanvasItemTextureFilter rect_texture_filter = texture_filter;
+
+				if (p_item->use_canvas_group && p_item->canvas_group->mode == RS::CANVAS_GROUP_MODE_TRANSPARENT && p_item->canvas_group_texture.is_valid()) {
+					rect_texture = p_item->canvas_group_texture;
+					direct_texture_size = RendererRD::TextureStorage::get_singleton()->render_target_get_size(p_render_target.render_target);
+					direct_rd_texture = true;
+					use_premul_blend = true;
+					rect_flags &= ~(CANVAS_RECT_MSDF | CANVAS_RECT_LCD);
+
+					if (p_item->canvas_group->blur_mipmaps) {
+						switch (rect_texture_filter) {
+							case RS::CANVAS_ITEM_TEXTURE_FILTER_NEAREST:
+							case RS::CANVAS_ITEM_TEXTURE_FILTER_NEAREST_WITH_MIPMAPS:
+								rect_texture_filter = RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS;
+								break;
+							case RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR:
+								rect_texture_filter = RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS;
+								break;
+							case RS::CANVAS_ITEM_TEXTURE_FILTER_NEAREST_WITH_MIPMAPS_ANISOTROPIC:
+								rect_texture_filter = RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC;
+								break;
+							default:
+								break;
+						}
+					}
+
+					if (rect_flags & CANVAS_RECT_IS_GROUP) {
+						rect_flags |= CANVAS_RECT_REGION | CANVAS_RECT_CLIP_UV;
+						rect_source = p_item->canvas_group_texture_rect;
+					}
+				}
 
 				// 1: If commands are different, start a new batch.
 				if (r_current_batch->command_type != Item::Command::TYPE_RECT) {
@@ -2545,7 +2553,7 @@ void RendererCanvasRenderRD::_record_item_commands(const Item *p_item, RenderTar
 				}
 
 				RenderingServer::CanvasItemTextureRepeat rect_repeat = texture_repeat;
-				if (bool(rect->flags & CANVAS_RECT_TILE)) {
+				if (bool(rect_flags & CANVAS_RECT_TILE)) {
 					rect_repeat = RenderingServer::CanvasItemTextureRepeat::CANVAS_ITEM_TEXTURE_REPEAT_ENABLED;
 				}
 
@@ -2554,23 +2562,24 @@ void RendererCanvasRenderRD::_record_item_commands(const Item *p_item, RenderTar
 					modulated = modulated.srgb_to_linear();
 				}
 
-				bool has_blend = bool(rect->flags & CANVAS_RECT_LCD);
+				bool has_blend = bool(rect_flags & CANVAS_RECT_LCD);
 				// Start a new batch if the blend mode has changed,
 				// or blend mode is enabled and the modulation has changed.
-				if (has_blend != r_current_batch->has_blend || (has_blend && modulated != r_current_batch->modulate)) {
+				if (has_blend != r_current_batch->has_blend || use_premul_blend != r_current_batch->premul_blend || (has_blend && modulated != r_current_batch->modulate)) {
 					r_current_batch = _new_batch(r_batch_broken);
 					r_current_batch->has_blend = has_blend;
+					r_current_batch->premul_blend = use_premul_blend;
 					r_current_batch->modulate = modulated;
 					r_current_batch->shader_variant = SHADER_VARIANT_QUAD;
 					r_current_batch->render_primitive = RD::RENDER_PRIMITIVE_TRIANGLES;
 				}
 
-				bool has_msdf = bool(rect->flags & CANVAS_RECT_MSDF);
-				TextureState tex_state(rect->texture, texture_filter, rect_repeat, has_msdf, use_linear_colors);
+				bool has_msdf = bool(rect_flags & CANVAS_RECT_MSDF);
+				TextureState tex_state(rect_texture, rect_texture_filter, rect_repeat, has_msdf, use_linear_colors, direct_rd_texture);
 				TextureInfo *tex_info = texture_info_map.getptr(tex_state);
 				if (!tex_info) {
 					tex_info = &texture_info_map.insert(tex_state, TextureInfo())->value;
-					_prepare_batch_texture_info(rect->texture, tex_state, tex_info);
+					_prepare_batch_texture_info(rect_texture, tex_state, tex_info, direct_texture_size);
 				}
 
 				if (has_msdf != r_current_batch->use_msdf || rect->px_range != r_current_batch->msdf_pix_range || rect->outline != r_current_batch->msdf_outline) {
@@ -2580,7 +2589,7 @@ void RendererCanvasRenderRD::_record_item_commands(const Item *p_item, RenderTar
 					r_current_batch->msdf_outline = rect->outline;
 				}
 
-				bool has_lcd = bool(rect->flags & CANVAS_RECT_LCD);
+				bool has_lcd = bool(rect_flags & CANVAS_RECT_LCD);
 				if (has_lcd != r_current_batch->use_lcd) {
 					r_current_batch = _new_batch(r_batch_broken);
 					r_current_batch->use_lcd = has_lcd;
@@ -2595,8 +2604,8 @@ void RendererCanvasRenderRD::_record_item_commands(const Item *p_item, RenderTar
 				Rect2 src_rect;
 				Rect2 dst_rect;
 
-				if (rect->texture.is_valid()) {
-					src_rect = (rect->flags & CANVAS_RECT_REGION) ? Rect2(rect->source.position * tex_info->texpixel_size, rect->source.size * tex_info->texpixel_size) : Rect2(0, 0, 1, 1);
+				if (rect_texture.is_valid()) {
+					src_rect = (rect_flags & CANVAS_RECT_REGION) ? Rect2(rect_source.position * tex_info->texpixel_size, rect_source.size * tex_info->texpixel_size) : Rect2(0, 0, 1, 1);
 					dst_rect = Rect2(rect->rect.position, rect->rect.size);
 
 					if (dst_rect.size.width < 0) {
@@ -2608,19 +2617,19 @@ void RendererCanvasRenderRD::_record_item_commands(const Item *p_item, RenderTar
 						dst_rect.size.height *= -1;
 					}
 
-					if (rect->flags & CANVAS_RECT_FLIP_H) {
+					if (rect_flags & CANVAS_RECT_FLIP_H) {
 						src_rect.size.x *= -1;
 					}
 
-					if (rect->flags & CANVAS_RECT_FLIP_V) {
+					if (rect_flags & CANVAS_RECT_FLIP_V) {
 						src_rect.size.y *= -1;
 					}
 
-					if (rect->flags & CANVAS_RECT_TRANSPOSE) {
+					if (rect_flags & CANVAS_RECT_TRANSPOSE) {
 						instance_data->flags |= INSTANCE_FLAGS_TRANSPOSE_RECT;
 					}
 
-					if (rect->flags & CANVAS_RECT_CLIP_UV) {
+					if (rect_flags & CANVAS_RECT_CLIP_UV) {
 						instance_data->flags |= INSTANCE_FLAGS_CLIP_RECT_UV;
 					}
 
@@ -3180,6 +3189,7 @@ void RendererCanvasRenderRD::_render_batch(RD::DrawListID p_draw_list, CanvasSha
 	pipeline_key.shader_specialization.use_msdf = p_batch->use_msdf;
 	pipeline_key.shader_specialization.use_lcd = p_batch->use_lcd;
 	pipeline_key.lcd_blend = p_batch->has_blend;
+	pipeline_key.premul_blend = p_batch->premul_blend;
 
 	switch (p_batch->command_type) {
 		case Item::Command::TYPE_RECT:
@@ -3436,9 +3446,31 @@ void RendererCanvasRenderRD::_allocate_instance_buffer() {
 	state.instance_data = reinterpret_cast<InstanceData *>(state.instance_buffers.map_raw_for_upload(0));
 }
 
-void RendererCanvasRenderRD::_prepare_batch_texture_info(RID p_texture, TextureState &p_state, TextureInfo *p_info) {
+void RendererCanvasRenderRD::_prepare_batch_texture_info(RID p_texture, TextureState &p_state, TextureInfo *p_info, const Size2i &p_direct_texture_size) {
 	if (p_texture.is_null()) {
 		p_texture = default_canvas_texture;
+	}
+
+	if (p_state.direct_rd_texture()) {
+		RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
+		RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
+		ERR_FAIL_COND(p_direct_texture_size.width <= 0 || p_direct_texture_size.height <= 0);
+
+		RS::CanvasItemTextureFilter filter = p_state.texture_filter();
+		ERR_FAIL_COND(filter == RS::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT);
+
+		RS::CanvasItemTextureRepeat repeat = p_state.texture_repeat();
+		ERR_FAIL_COND(repeat == RS::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT);
+
+		p_info->state = p_state;
+		p_info->diffuse = p_texture;
+		p_info->normal = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_NORMAL);
+		p_info->specular = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE);
+		p_info->sampler = material_storage->sampler_rd_get_default(filter, repeat);
+		p_info->texpixel_size = Vector2(1.0 / float(p_direct_texture_size.width), 1.0 / float(p_direct_texture_size.height));
+		p_info->specular_shininess = uint32_t(255) << 24 | uint32_t(255) << 16 | uint32_t(255) << 8 | uint32_t(255);
+		p_info->flags = 0;
+		return;
 	}
 
 	RendererRD::TextureStorage::CanvasTextureInfo info =
@@ -3483,9 +3515,6 @@ RendererCanvasRenderRD::~RendererCanvasRenderRD() {
 	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
 
 	//canvas state
-
-	material_storage->material_free(default_canvas_group_material);
-	material_storage->shader_free(default_canvas_group_shader);
 
 	material_storage->material_free(default_clip_children_material);
 	material_storage->shader_free(default_clip_children_shader);

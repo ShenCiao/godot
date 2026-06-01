@@ -313,6 +313,7 @@ void RendererCanvasCull::_attach_canvas_item_for_draw(RendererCanvasCull::Item *
 				}
 
 				rect_accum = rect_accum.grow(ci->canvas_group->fit_margin);
+				ci->canvas_group_texture_rect = rect_accum;
 
 				//draw it?
 				RendererCanvasRender::Item::CommandRect *crect = ci->alloc_command<RendererCanvasRender::Item::CommandRect>();

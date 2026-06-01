@@ -131,6 +131,7 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 		RD::RenderPrimitive render_primitive = RD::RENDER_PRIMITIVE_MAX;
 		ShaderSpecialization shader_specialization = {};
 		uint32_t lcd_blend = 0;
+		uint32_t premul_blend = 0;
 		uint32_t ubershader = 0;
 
 		uint32_t hash() const {
@@ -140,6 +141,7 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 			h = hash_murmur3_one_32(render_primitive, h);
 			h = hash_murmur3_one_32(shader_specialization.packed_0, h);
 			h = hash_murmur3_one_32(lcd_blend, h);
+			h = hash_murmur3_one_32(premul_blend, h);
 			h = hash_murmur3_one_32(ubershader, h);
 			return hash_fmix32(h);
 		}
@@ -416,18 +418,22 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 		static const uint32_t LINEAR_COLORS_SHIFT = TEXTURE_IS_DATA_SHIFT + TEXTURE_IS_DATA_BITS;
 		static const uint32_t LINEAR_COLORS_BITS = 1;
 		static const uint32_t LINEAR_COLORS_MASK = (1 << LINEAR_COLORS_BITS) - 1;
+		static const uint32_t DIRECT_RD_TEXTURE_SHIFT = LINEAR_COLORS_SHIFT + LINEAR_COLORS_BITS;
+		static const uint32_t DIRECT_RD_TEXTURE_BITS = 1;
+		static const uint32_t DIRECT_RD_TEXTURE_MASK = (1 << DIRECT_RD_TEXTURE_BITS) - 1;
 
 		RID texture;
 		uint32_t other = 0;
 
 		TextureState() {}
 
-		TextureState(RID p_texture, RS::CanvasItemTextureFilter p_base_filter, RS::CanvasItemTextureRepeat p_base_repeat, bool p_texture_is_data, bool p_use_linear_colors) {
+		TextureState(RID p_texture, RS::CanvasItemTextureFilter p_base_filter, RS::CanvasItemTextureRepeat p_base_repeat, bool p_texture_is_data, bool p_use_linear_colors, bool p_direct_rd_texture = false) {
 			texture = p_texture;
 			other = (((uint32_t)p_base_filter & FILTER_MASK) << FILTER_SHIFT) |
 					(((uint32_t)p_base_repeat & REPEAT_MASK) << REPEAT_SHIFT) |
 					(((uint32_t)p_texture_is_data & TEXTURE_IS_DATA_MASK) << TEXTURE_IS_DATA_SHIFT) |
-					(((uint32_t)p_use_linear_colors & LINEAR_COLORS_MASK) << LINEAR_COLORS_SHIFT);
+					(((uint32_t)p_use_linear_colors & LINEAR_COLORS_MASK) << LINEAR_COLORS_SHIFT) |
+					(((uint32_t)p_direct_rd_texture & DIRECT_RD_TEXTURE_MASK) << DIRECT_RD_TEXTURE_SHIFT);
 		}
 
 		_ALWAYS_INLINE_ RS::CanvasItemTextureFilter texture_filter() const {
@@ -444,6 +450,10 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 
 		_ALWAYS_INLINE_ bool texture_is_data() const {
 			return (other >> TEXTURE_IS_DATA_SHIFT) & TEXTURE_IS_DATA_MASK;
+		}
+
+		_ALWAYS_INLINE_ bool direct_rd_texture() const {
+			return (other >> DIRECT_RD_TEXTURE_SHIFT) & DIRECT_RD_TEXTURE_MASK;
 		}
 
 		_ALWAYS_INLINE_ bool operator==(const TextureState &p_val) const {
@@ -541,6 +551,7 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 		bool use_msdf = false;
 		bool use_lcd = false;
 		bool has_blend = false;
+		bool premul_blend = false;
 
 		// batch-specific data
 		union {
@@ -650,8 +661,6 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 	bool using_directional_lights = false;
 	RID default_canvas_texture;
 
-	RID default_canvas_group_shader;
-	RID default_canvas_group_material;
 	RID default_clip_children_material;
 	RID default_clip_children_shader;
 
@@ -683,7 +692,7 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 	void _render_batch_items(RenderTarget p_to_render_target, int p_item_count, const Transform2D &p_canvas_transform_inverse, Light *p_lights, bool &r_sdf_used, bool p_to_backbuffer = false, RenderingMethod::RenderInfo *r_render_info = nullptr);
 	void _record_item_commands(const Item *p_item, RenderTarget p_render_target, const Transform2D &p_base_transform, Item *&r_current_clip, Light *p_lights, bool &r_batch_broken, bool &r_sdf_used, Batch *&r_current_batch);
 	void _render_batch(RD::DrawListID p_draw_list, CanvasShaderData *p_shader_data, RenderingDevice::FramebufferFormatID p_framebuffer_format, Light *p_lights, Batch const *p_batch, RenderingMethod::RenderInfo *r_render_info = nullptr);
-	void _prepare_batch_texture_info(RID p_texture, TextureState &p_state, TextureInfo *p_info);
+	void _prepare_batch_texture_info(RID p_texture, TextureState &p_state, TextureInfo *p_info, const Size2i &p_direct_texture_size = Size2i());
 
 	// non-UMA
 	InstanceData *new_instance_data(Batch &p_current_batch, const InstanceData &template_instance, bool p_use_push_data = false);
