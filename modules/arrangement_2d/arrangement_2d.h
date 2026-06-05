@@ -37,8 +37,8 @@ public:
 	RID query(Vector2 p_point);
 	TypedArray<RID> batch_query(PackedVector2Array p_points);
 	TypedArray<RID> polyline_query(PackedVector2Array p_polyline); // Returns face RIDs.
-	TypedArray<PackedVector2Array> get_polygon(RID p_id);
-	Dictionary get_triangles(RID p_id);
+	TypedArray<PackedVector2Array> get_polygon_from_face(RID p_id);
+	Dictionary get_triangles_from_face(RID p_id);
 	bool is_unbounded_face(RID p_id);
 	RID get_unbounded_face();
 

@@ -23,8 +23,8 @@ void Arrangement2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query", "point"), &Arrangement2D::query);
 	ClassDB::bind_method(D_METHOD("polyline_query", "polyline"), &Arrangement2D::polyline_query);
 	ClassDB::bind_method(D_METHOD("batch_query", "points"), &Arrangement2D::batch_query);
-	ClassDB::bind_method(D_METHOD("get_polygon", "face_id"), &Arrangement2D::get_polygon);
-	ClassDB::bind_method(D_METHOD("get_triangles", "face_id"), &Arrangement2D::get_triangles);
+	ClassDB::bind_method(D_METHOD("get_polygon_from_face", "face_id"), &Arrangement2D::get_polygon_from_face);
+	ClassDB::bind_method(D_METHOD("get_triangles_from_face", "face_id"), &Arrangement2D::get_triangles_from_face);
 	ClassDB::bind_method(D_METHOD("is_unbounded_face", "id"), &Arrangement2D::is_unbounded_face);
 	ClassDB::bind_method(D_METHOD("get_unbounded_face"), &Arrangement2D::get_unbounded_face);
 	ClassDB::bind_static_method("Arrangement2D", D_METHOD("repair_and_triangulate", "polygons"), &Arrangement2D::repair_and_triangulate);
@@ -184,7 +184,7 @@ std::vector<CGAL::Face_const_handle> Arrangement2D::zone_query(const CGAL::X_mon
 	return result;
 }
 
-TypedArray<PackedVector2Array> Arrangement2D::get_polygon(RID p_id) {
+TypedArray<PackedVector2Array> Arrangement2D::get_polygon_from_face(RID p_id) {
 	if (!p_id.is_valid() || !face_handle_owner.owns(p_id)) {
 		return {};
 	}
@@ -192,16 +192,12 @@ TypedArray<PackedVector2Array> Arrangement2D::get_polygon(RID p_id) {
 	return face_to_polygons(handle);
 }
 
-Dictionary Arrangement2D::get_triangles(RID p_id) {
+Dictionary Arrangement2D::get_triangles_from_face(RID p_id) {
 	if (!p_id.is_valid() || !face_handle_owner.owns(p_id)) {
 		return make_triangle_result();
 	}
 
 	CGAL::Face_const_handle handle = *face_handle_owner.get_or_null(p_id);
-	if (handle->is_unbounded()) {
-		return make_triangle_result();
-	}
-
 	// Face rings can include hole CCBs and zero-width artifacts, so triangulation must run after repair.
 	return triangulate(repair_polygons(face_to_raw_polygons(handle)));
 }
@@ -293,8 +289,8 @@ std::vector<CGAL::Polygon2> Arrangement2D::face_to_raw_polygons(CGAL::Face_const
 	if (!p_face->is_unbounded()) {
 		ccb_circulators.push_back(p_face->outer_ccb());
 	}
-	// Keep hole CCBs in the same ring set as the outer CCB. We do not tag holes here;
-	// CGAL's even-odd repair below reconstructs nested rings as holes.
+	// For unbounded faces, hole CCBs are the finite regions enclosed by the infinite exterior.
+	// Keep all CCBs in one ring set; even-odd repair reconstructs the filled areas and holes.
 	for (auto hole_it = p_face->holes_begin(); hole_it != p_face->holes_end(); ++hole_it) {
 		CGAL::Arrangement::Ccb_halfedge_const_circulator hole_ccb = *hole_it;
 		ccb_circulators.push_back(hole_ccb);
