@@ -25,6 +25,7 @@ public:
 	RID_Owner<CGAL::Curve_handle> curve_handle_owner;
 	RID_Owner<CGAL::Face_const_handle> face_handle_owner;
 	std::unordered_map<CGAL::Face_const_handle, RID> face_handle_to_rid;
+	std::unordered_map<const CGAL::Curve *, RID> curve_handle_to_rid;
 
 	void _notification(int p_what);
 
@@ -34,9 +35,10 @@ public:
 	void set_polyline(RID p_id, PackedVector2Array p_data); // Returns invalid face RIDs.
 	void remove_polyline(RID p_id);
 
-	RID query(Vector2 p_point);
-	TypedArray<RID> batch_query(PackedVector2Array p_points);
-	TypedArray<RID> polyline_query(PackedVector2Array p_polyline); // Returns face RIDs.
+	RID point_query_face(Vector2 p_point);
+	TypedArray<RID> points_query_faces(PackedVector2Array p_points);
+	TypedArray<RID> polyline_query_faces(PackedVector2Array p_polyline); // Returns face RIDs.
+	TypedArray<Dictionary> polyline_query_edges(PackedVector2Array p_polyline);
 	TypedArray<PackedVector2Array> get_polygon_from_face(RID p_id);
 	Dictionary get_triangles_from_face(RID p_id);
 	bool is_unbounded_face(RID p_id);
@@ -46,13 +48,18 @@ public:
 
 	RID cache_face_handle(CGAL::Face_const_handle p_handle);
 	std::vector<CGAL::Face_const_handle> zone_query(const CGAL::X_monotone_curve &p_mono_curve);
+	std::vector<CGAL::Halfedge_const_handle> zone_query_edges(const CGAL::X_monotone_curve &p_mono_curve);
+	Dictionary make_edge_query_result(RID p_source_id, float p_from_t, float p_to_t, Vector2 p_from_point, Vector2 p_to_point);
+	static float point_to_poly_t(const CGAL::Curve &p_curve, const CGAL::Point &p_point);
 	static std::vector<CGAL::X_monotone_curve> construct_x_monotone_curves(PackedVector2Array p_polyline);
 	static PackedVector2Array remove_consecutive_overlapping_points(PackedVector2Array p_polyline);
 	static std::vector<CGAL::Point> vector2_to_points(PackedVector2Array p_polyline);
+	static Vector2 point_to_vector2(const CGAL::Point &p_point);
 	static CGAL::Polygon2 packed_to_polygon(const PackedVector2Array &p_polygon);
 	static std::vector<CGAL::Polygon2> packed_to_polygons(TypedArray<PackedVector2Array> p_polygons);
 	static PackedVector2Array polygon_to_packed(const CGAL::Polygon2 &p_polygon);
 	static std::vector<CGAL::Polygon2> face_to_raw_polygons(CGAL::Face_const_handle p_face);
+	// Takes ownership of the polygon list so each ring can be moved into CGAL's repair input.
 	static CGAL::MultipolygonWithHoles2 repair_polygons(std::vector<CGAL::Polygon2> p_polygons);
 	static TypedArray<PackedVector2Array> face_to_polygons(CGAL::Face_const_handle p_face);
 	static TypedArray<PackedVector2Array> multipolygon_to_packed_polygons(const CGAL::MultipolygonWithHoles2 &p_multipolygon);

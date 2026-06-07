@@ -10,6 +10,7 @@
 #include "core/string/ustring.h"
 
 #include <algorithm>
+#include <cmath>
 #include <iterator>
 #include <list>
 #include <map>
@@ -20,9 +21,10 @@ void Arrangement2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("create_polyline"), &Arrangement2D::create_polyline);
 	ClassDB::bind_method(D_METHOD("remove_polyline", "id"), &Arrangement2D::remove_polyline);
 	ClassDB::bind_method(D_METHOD("set_polyline", "id", "data"), &Arrangement2D::set_polyline);
-	ClassDB::bind_method(D_METHOD("query", "point"), &Arrangement2D::query);
-	ClassDB::bind_method(D_METHOD("polyline_query", "polyline"), &Arrangement2D::polyline_query);
-	ClassDB::bind_method(D_METHOD("batch_query", "points"), &Arrangement2D::batch_query);
+	ClassDB::bind_method(D_METHOD("point_query_face", "point"), &Arrangement2D::point_query_face);
+	ClassDB::bind_method(D_METHOD("polyline_query_faces", "polyline"), &Arrangement2D::polyline_query_faces);
+	ClassDB::bind_method(D_METHOD("polyline_query_edges", "polyline"), &Arrangement2D::polyline_query_edges);
+	ClassDB::bind_method(D_METHOD("points_query_faces", "points"), &Arrangement2D::points_query_faces);
 	ClassDB::bind_method(D_METHOD("get_polygon_from_face", "face_id"), &Arrangement2D::get_polygon_from_face);
 	ClassDB::bind_method(D_METHOD("get_triangles_from_face", "face_id"), &Arrangement2D::get_triangles_from_face);
 	ClassDB::bind_method(D_METHOD("is_unbounded_face", "id"), &Arrangement2D::is_unbounded_face);
@@ -42,6 +44,7 @@ void Arrangement2D::_notification(int p_what) {
 			face_handle_owner.free(id);
 		}
 		face_handle_to_rid.clear();
+		curve_handle_to_rid.clear();
 	}
 }
 
@@ -61,6 +64,7 @@ void Arrangement2D::set_polyline(RID p_id, PackedVector2Array p_data) {
 
 	CGAL::Curve_handle curve_handle = *ptr;
 	if (curve_handle != nullptr) {
+		curve_handle_to_rid.erase(&(*curve_handle));
 		CGAL::remove_curve(arrangement, curve_handle);
 		*ptr = nullptr;
 	}
@@ -72,6 +76,7 @@ void Arrangement2D::set_polyline(RID p_id, PackedVector2Array p_data) {
 	CGAL::Curve curve = curve_constructor(vector2_to_points(p_data));
 	auto handle = CGAL::insert(arrangement, curve);
 	*ptr = handle;
+	curve_handle_to_rid[&(*handle)] = p_id;
 }
 
 void Arrangement2D::remove_polyline(RID p_id) {
@@ -83,11 +88,12 @@ void Arrangement2D::remove_polyline(RID p_id) {
 	CGAL::Curve_handle curve_handle = *ptr;
 	curve_handle_owner.free(p_id);
 	if (curve_handle != nullptr) {
+		curve_handle_to_rid.erase(&(*curve_handle));
 		CGAL::remove_curve(arrangement, curve_handle);
 	}
 }
 
-RID Arrangement2D::query(Vector2 p_point) {
+RID Arrangement2D::point_query_face(Vector2 p_point) {
 	auto obj = point_location.locate(CGAL::Point(p_point.x, p_point.y));
 	auto face_handle_ptr = std::get_if<CGAL::Face_const_handle>(&obj);
 	if (face_handle_ptr != nullptr) {
@@ -106,7 +112,7 @@ RID Arrangement2D::cache_face_handle(CGAL::Face_const_handle p_handle) {
 	}
 }
 
-TypedArray<RID> Arrangement2D::batch_query(PackedVector2Array p_points) {
+TypedArray<RID> Arrangement2D::points_query_faces(PackedVector2Array p_points) {
 	TypedArray<RID> rids{};
 	rids.resize(p_points.size());
 
@@ -127,13 +133,13 @@ TypedArray<RID> Arrangement2D::batch_query(PackedVector2Array p_points) {
 	return rids;
 }
 
-TypedArray<RID> Arrangement2D::polyline_query(PackedVector2Array p_polyline) {
+TypedArray<RID> Arrangement2D::polyline_query_faces(PackedVector2Array p_polyline) {
 	p_polyline = remove_consecutive_overlapping_points(p_polyline);
 	if (p_polyline.size() == 0) {
 		return {};
 	}
 	if (p_polyline.size() == 1) {
-		return { query(p_polyline[0]) };
+		return { point_query_face(p_polyline[0]) };
 	}
 
 	auto mono_curves = construct_x_monotone_curves(p_polyline);
@@ -148,6 +154,41 @@ TypedArray<RID> Arrangement2D::polyline_query(PackedVector2Array p_polyline) {
 	TypedArray<RID> result{};
 	for (RID id : ids)
 		result.push_back(id);
+	return result;
+}
+
+TypedArray<Dictionary> Arrangement2D::polyline_query_edges(PackedVector2Array p_polyline) {
+	p_polyline = remove_consecutive_overlapping_points(p_polyline);
+	if (p_polyline.size() < 2) {
+		return {};
+	}
+
+	auto mono_curves = construct_x_monotone_curves(p_polyline);
+	std::set<CGAL::Halfedge_const_handle> halfedges{};
+	for (auto &curve : mono_curves) {
+		for (auto halfedge : zone_query_edges(curve)) {
+			halfedges.insert(halfedge);
+		}
+	}
+
+	TypedArray<Dictionary> result{};
+	for (auto halfedge : halfedges) {
+		CGAL::Point source_point = halfedge->source()->point();
+		CGAL::Point target_point = halfedge->target()->point();
+		Vector2 source_vector = point_to_vector2(source_point);
+		Vector2 target_vector = point_to_vector2(target_point);
+
+		for (auto curve_it = arrangement.originating_curves_begin(halfedge);
+				curve_it != arrangement.originating_curves_end(halfedge);
+				++curve_it) {
+			auto source_id_it = curve_handle_to_rid.find(&(*curve_it));
+			CRASH_COND(source_id_it == curve_handle_to_rid.end());
+			RID source_id = source_id_it->second;
+			float source_t = point_to_poly_t(*curve_it, source_point);
+			float target_t = point_to_poly_t(*curve_it, target_point);
+			result.push_back(make_edge_query_result(source_id, source_t, target_t, source_vector, target_vector));
+		}
+	}
 	return result;
 }
 
@@ -182,6 +223,68 @@ std::vector<CGAL::Face_const_handle> Arrangement2D::zone_query(const CGAL::X_mon
 	}
 
 	return result;
+}
+
+std::vector<CGAL::Halfedge_const_handle> Arrangement2D::zone_query_edges(const CGAL::X_monotone_curve &p_mono_curve) {
+	std::vector<CGAL::Halfedge_const_handle> result{};
+	constexpr int MAX_RESULT = 1024;
+	using Result = std::variant<CGAL::Arrangement::Vertex_handle, CGAL::Arrangement::Halfedge_handle, CGAL::Arrangement::Face_handle>;
+	std::vector<Result> output(MAX_RESULT);
+	auto begin_it = output.begin();
+	auto end_it = CGAL::zone(arrangement, p_mono_curve, begin_it, point_location);
+
+	for (auto it = begin_it; it != end_it; ++it) {
+		if (auto halfedge_handle_ptr = std::get_if<CGAL::Arrangement::Halfedge_handle>(&*it)) {
+			result.emplace_back(*halfedge_handle_ptr);
+		}
+	}
+
+	return result;
+}
+
+Dictionary Arrangement2D::make_edge_query_result(RID p_source_id, float p_from_t, float p_to_t, Vector2 p_from_point, Vector2 p_to_point) {
+	Dictionary result{};
+	result["source_rid"] = p_source_id;
+	result["from_t"] = p_from_t;
+	result["to_t"] = p_to_t;
+	result["from_point"] = p_from_point;
+	result["to_point"] = p_to_point;
+	return result;
+}
+
+float Arrangement2D::point_to_poly_t(const CGAL::Curve &p_curve, const CGAL::Point &p_point) {
+	auto begin_it = p_curve.points_begin();
+	auto end_it = p_curve.points_end();
+	if (begin_it == end_it) {
+		return 0.0f;
+	}
+
+	auto prev = begin_it;
+	int segment_index = 0;
+	for (auto next = std::next(begin_it); next != end_it; ++next, ++prev, ++segment_index) {
+		CGAL::Segment_traits::Compare_xy_2 compare_xy = CGAL::Segment_traits{}.compare_xy_2_object();
+		CGAL::Segment_traits::Collinear_are_ordered_along_line_2 ordered =
+				CGAL::Segment_traits{}.collinear_are_ordered_along_line_2_object();
+		if (compare_xy(*prev, p_point) == CGAL::EQUAL) {
+			return static_cast<float>(segment_index);
+		}
+		if (compare_xy(*next, p_point) == CGAL::EQUAL) {
+			return static_cast<float>(segment_index + 1);
+		}
+		if (!ordered(*prev, p_point, *next)) {
+			continue;
+		}
+
+		double dx = CGAL::to_double(next->x() - prev->x());
+		double dy = CGAL::to_double(next->y() - prev->y());
+		double numerator = std::abs(dx) >= std::abs(dy)
+				? CGAL::to_double(p_point.x() - prev->x())
+				: CGAL::to_double(p_point.y() - prev->y());
+		double denominator = std::abs(dx) >= std::abs(dy) ? dx : dy;
+		return static_cast<float>(segment_index + numerator / denominator);
+	}
+
+	return static_cast<float>(segment_index);
 }
 
 TypedArray<PackedVector2Array> Arrangement2D::get_polygon_from_face(RID p_id) {
@@ -237,6 +340,13 @@ std::vector<CGAL::Point> Arrangement2D::vector2_to_points(PackedVector2Array p_p
 		points.emplace_back(point.x, point.y);
 	}
 	return points;
+}
+
+Vector2 Arrangement2D::point_to_vector2(const CGAL::Point &p_point) {
+	return {
+		static_cast<float>(CGAL::to_double(p_point.x())),
+		static_cast<float>(CGAL::to_double(p_point.y()))
+	};
 }
 
 CGAL::Polygon2 Arrangement2D::packed_to_polygon(const PackedVector2Array &p_polygon) {
@@ -399,10 +509,7 @@ Dictionary Arrangement2D::triangulate(const CGAL::MultipolygonWithHoles2 &p_mult
 
 		const CGAL::Point &point = p_vertex->point();
 		int index = vertices.size();
-		vertices.push_back({
-			static_cast<float>(CGAL::to_double(point.x())),
-			static_cast<float>(CGAL::to_double(point.y()))
-		});
+		vertices.push_back(point_to_vector2(point));
 		vertex_indices[p_vertex] = index;
 		return index;
 	};
