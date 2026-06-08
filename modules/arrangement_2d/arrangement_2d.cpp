@@ -18,6 +18,7 @@
 #include <variant>
 
 void Arrangement2D::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("clear"), &Arrangement2D::clear);
 	ClassDB::bind_method(D_METHOD("create_polyline", "id"), &Arrangement2D::create_polyline);
 	ClassDB::bind_method(D_METHOD("remove_polyline", "id"), &Arrangement2D::remove_polyline);
 	ClassDB::bind_method(D_METHOD("set_polyline", "id", "data"), &Arrangement2D::set_polyline);
@@ -34,20 +35,22 @@ void Arrangement2D::_bind_methods() {
 
 void Arrangement2D::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PREDELETE) {
-		LocalVector<RID> rids = face_handle_owner.get_owned_list();
-		for (const RID &id : rids) {
-			face_handle_owner.free(id);
-		}
-		face_handle_to_rid.clear();
-		curve_handles.clear();
-		curve_handle_to_id.clear();
+		clear();
 	}
 }
 
 Arrangement2D::Arrangement2D() {
 }
 
+void Arrangement2D::clear() {
+	clear_face_cache();
+	curve_handles.clear();
+	curve_handle_to_id.clear();
+	arrangement.clear();
+}
+
 void Arrangement2D::create_polyline(int64_t p_id) {
+	clear_face_cache();
 	CGAL::Curve_handle curve_handle = curve_handles[p_id];
 	if (curve_handle != nullptr) {
 		curve_handle_to_id.erase(&(*curve_handle));
@@ -57,6 +60,7 @@ void Arrangement2D::create_polyline(int64_t p_id) {
 }
 
 void Arrangement2D::set_polyline(int64_t p_id, PackedVector2Array p_data) {
+	clear_face_cache();
 	CGAL::Curve_handle curve_handle = curve_handles[p_id];
 	if (curve_handle != nullptr) {
 		curve_handle_to_id.erase(&(*curve_handle));
@@ -74,12 +78,18 @@ void Arrangement2D::set_polyline(int64_t p_id, PackedVector2Array p_data) {
 }
 
 void Arrangement2D::remove_polyline(int64_t p_id) {
-	CGAL::Curve_handle curve_handle = curve_handles[p_id];
+	auto curve_handle_it = curve_handles.find(p_id);
+	if (curve_handle_it == curve_handles.end()) {
+		return;
+	}
+
+	CGAL::Curve_handle curve_handle = curve_handle_it->second;
 	if (curve_handle != nullptr) {
+		clear_face_cache();
 		curve_handle_to_id.erase(&(*curve_handle));
 		CGAL::remove_curve(arrangement, curve_handle);
 	}
-	curve_handles.erase(p_id);
+	curve_handles.erase(curve_handle_it);
 }
 
 RID Arrangement2D::point_query_face(Vector2 p_point) {
@@ -89,6 +99,14 @@ RID Arrangement2D::point_query_face(Vector2 p_point) {
 		return cache_face_handle(*face_handle_ptr);
 	}
 	return {};
+}
+
+void Arrangement2D::clear_face_cache() {
+	LocalVector<RID> rids = face_handle_owner.get_owned_list();
+	for (const RID &id : rids) {
+		face_handle_owner.free(id);
+	}
+	face_handle_to_rid.clear();
 }
 
 RID Arrangement2D::cache_face_handle(CGAL::Face_const_handle p_handle) {

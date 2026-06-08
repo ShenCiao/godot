@@ -32,6 +32,7 @@ public:
 
 	Arrangement2D();
 
+	void clear();
 	void create_polyline(int64_t p_id);
 	void set_polyline(int64_t p_id, PackedVector2Array p_data); // Returns invalid face RIDs.
 	void remove_polyline(int64_t p_id);
@@ -47,6 +48,7 @@ public:
 
 	static Dictionary repair_and_triangulate(TypedArray<PackedVector2Array> p_polygons);
 
+	void clear_face_cache();
 	RID cache_face_handle(CGAL::Face_const_handle p_handle);
 	std::vector<CGAL::Face_const_handle> zone_query(const CGAL::X_monotone_curve &p_mono_curve);
 	std::vector<CGAL::Halfedge_const_handle> zone_query_edges(const CGAL::X_monotone_curve &p_mono_curve);
