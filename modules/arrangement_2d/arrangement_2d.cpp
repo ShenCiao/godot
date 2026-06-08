@@ -17,6 +17,240 @@
 #include <set>
 #include <variant>
 
+namespace {
+
+using CurveConstHandle = CGAL::Arrangement::Curve_const_handle;
+
+struct PolyTRange {
+	float from = 0.0f;
+	float to = 0.0f;
+};
+
+double segment_fraction(const CGAL::Point &p_from, const CGAL::Point &p_to, const CGAL::Point &p_point) {
+	double dx = CGAL::to_double(p_to.x() - p_from.x());
+	double dy = CGAL::to_double(p_to.y() - p_from.y());
+	double numerator = std::abs(dx) >= std::abs(dy)
+			? CGAL::to_double(p_point.x() - p_from.x())
+			: CGAL::to_double(p_point.y() - p_from.y());
+	double denominator = std::abs(dx) >= std::abs(dy) ? dx : dy;
+	if (denominator == 0.0) {
+		return 0.0;
+	}
+	return numerator / denominator;
+}
+
+bool point_on_segment(const CGAL::Point &p_from, const CGAL::Point &p_point, const CGAL::Point &p_to) {
+	CGAL::Segment_traits traits;
+	CGAL::Segment_traits::Collinear_2 collinear = traits.collinear_2_object();
+	if (!collinear(p_from, p_point, p_to)) {
+		return false;
+	}
+	CGAL::Segment_traits::Collinear_are_ordered_along_line_2 ordered = traits.collinear_are_ordered_along_line_2_object();
+	return ordered(p_from, p_point, p_to);
+}
+
+std::vector<float> point_to_poly_ts(const CGAL::Curve &p_curve, const CGAL::Point &p_point) {
+	std::vector<float> result;
+	auto prev = p_curve.points_begin();
+	auto end_it = p_curve.points_end();
+	if (prev == end_it) {
+		return result;
+	}
+
+	int segment_index = 0;
+	for (auto next = std::next(prev); next != end_it; ++next, ++prev, ++segment_index) {
+		if (point_on_segment(*prev, p_point, *next)) {
+			result.push_back(static_cast<float>(segment_index + segment_fraction(*prev, *next, p_point)));
+		}
+	}
+	return result;
+}
+
+std::vector<PolyTRange> subedge_to_poly_ranges(const CGAL::Curve &p_curve, const CGAL::Point &p_from, const CGAL::Point &p_to) {
+	std::vector<PolyTRange> ranges;
+	CGAL::Segment_traits traits;
+	CGAL::Segment_traits::Collinear_2 collinear = traits.collinear_2_object();
+
+	auto prev = p_curve.points_begin();
+	auto end_it = p_curve.points_end();
+	if (prev == end_it) {
+		return ranges;
+	}
+
+	int segment_index = 0;
+	for (auto next = std::next(prev); next != end_it; ++next, ++prev, ++segment_index) {
+		if (!point_on_segment(*prev, p_from, *next) ||
+				!point_on_segment(*prev, p_to, *next) ||
+				!collinear(*prev, p_from, p_to)) {
+			continue;
+		}
+
+		float from_t = static_cast<float>(segment_index + segment_fraction(*prev, *next, p_from));
+		float to_t = static_cast<float>(segment_index + segment_fraction(*prev, *next, p_to));
+		ranges.push_back({ std::min(from_t, to_t), std::max(from_t, to_t) });
+	}
+
+	return ranges;
+}
+
+std::vector<PolyTRange> halfedge_to_poly_ranges(const CGAL::Curve &p_curve, CGAL::Halfedge_const_handle p_halfedge) {
+	std::vector<PolyTRange> ranges;
+	auto prev = p_halfedge->curve().points_begin();
+	auto end_it = p_halfedge->curve().points_end();
+	if (prev == end_it) {
+		return ranges;
+	}
+
+	for (auto next = std::next(prev); next != end_it; ++next, ++prev) {
+		std::vector<PolyTRange> subedge_ranges = subedge_to_poly_ranges(p_curve, *prev, *next);
+		if (subedge_ranges.empty()) {
+			WARN_PRINT_ONCE("Arrangement halfedge subedge could not be mapped back to its source polyline segment.");
+			continue;
+		}
+		for (const PolyTRange &range : subedge_ranges) {
+			if (range.to > range.from) {
+				ranges.push_back(range);
+			}
+		}
+	}
+	return ranges;
+}
+
+void add_point_stop_ts(std::vector<float> &r_stop_ts, const CGAL::Curve &p_curve, const CGAL::Point &p_point) {
+	for (float t : point_to_poly_ts(p_curve, p_point)) {
+		r_stop_ts.push_back(t);
+	}
+}
+
+bool points_equal(const CGAL::Point &p_a, const CGAL::Point &p_b) {
+	CGAL::Segment_traits traits;
+	CGAL::Segment_traits::Compare_xy_2 compare_xy = traits.compare_xy_2_object();
+	return compare_xy(p_a, p_b) == CGAL::EQUAL;
+}
+
+void add_source_self_intersection_stop_ts(std::vector<float> &r_stop_ts, const CGAL::Curve &p_curve) {
+	struct SourceSegment {
+		CGAL::Segment_traits::X_monotone_curve_2 curve;
+		int index = 0;
+	};
+
+	std::vector<SourceSegment> segments;
+	auto prev = p_curve.points_begin();
+	auto end_it = p_curve.points_end();
+	if (prev == end_it) {
+		return;
+	}
+
+	int segment_index = 0;
+	for (auto next = std::next(prev); next != end_it; ++next, ++prev, ++segment_index) {
+		if (!points_equal(*prev, *next)) {
+			segments.push_back({ CGAL::Segment_traits::X_monotone_curve_2(*prev, *next), segment_index });
+		}
+	}
+
+	using IntersectionPoint = std::pair<CGAL::Point, CGAL::Segment_traits::Multiplicity>;
+	using IntersectionResult = std::variant<IntersectionPoint, CGAL::Segment_traits::X_monotone_curve_2>;
+
+	CGAL::Segment_traits traits;
+	CGAL::Segment_traits::Intersect_2 intersect = traits.intersect_2_object();
+	for (size_t i = 0; i < segments.size(); ++i) {
+		for (size_t j = i + 1; j < segments.size(); ++j) {
+			std::vector<IntersectionResult> intersections;
+			intersect(segments[i].curve, segments[j].curve, std::back_inserter(intersections));
+
+			const bool adjacent = segments[i].index + 1 == segments[j].index;
+			for (const IntersectionResult &intersection : intersections) {
+				if (const IntersectionPoint *point = std::get_if<IntersectionPoint>(&intersection)) {
+					if (!adjacent) {
+						add_point_stop_ts(r_stop_ts, p_curve, point->first);
+					}
+					continue;
+				}
+
+				const CGAL::Segment_traits::X_monotone_curve_2 *overlap = std::get_if<CGAL::Segment_traits::X_monotone_curve_2>(&intersection);
+				if (overlap != nullptr) {
+					add_point_stop_ts(r_stop_ts, p_curve, overlap->source());
+					add_point_stop_ts(r_stop_ts, p_curve, overlap->target());
+				}
+			}
+		}
+	}
+}
+
+bool has_originating_curve(CGAL::Arrangement &p_arrangement, CGAL::Halfedge_const_handle p_halfedge, CurveConstHandle p_curve) {
+	for (auto curve_it = p_arrangement.originating_curves_begin(p_halfedge);
+			curve_it != p_arrangement.originating_curves_end(p_halfedge);
+			++curve_it) {
+		if (&(*curve_it) == &(*p_curve)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+std::vector<float> curve_stop_ts(CGAL::Arrangement &p_arrangement, CurveConstHandle p_curve) {
+	auto first_point = p_curve->points_begin();
+	auto end_point = p_curve->points_end();
+	if (first_point == end_point) {
+		WARN_PRINT_ONCE("Cannot compute trim stops for an empty source curve.");
+		return {};
+	}
+	auto last_point = end_point;
+	--last_point;
+
+	std::vector<float> stop_ts = {
+		0.0f,
+		static_cast<float>(std::distance(first_point, last_point))
+	};
+	add_source_self_intersection_stop_ts(stop_ts, *p_curve);
+
+	for (auto edge_it = p_arrangement.induced_edges_begin(p_curve);
+			edge_it != p_arrangement.induced_edges_end(p_curve);
+			++edge_it) {
+		CGAL::Halfedge_const_handle halfedge = *edge_it;
+		if (!has_originating_curve(p_arrangement, halfedge, p_curve)) {
+			halfedge = halfedge->twin();
+			if (!has_originating_curve(p_arrangement, halfedge, p_curve)) {
+				WARN_PRINT_ONCE("Induced edge is missing its originating curve.");
+				continue;
+			}
+		}
+
+		if (halfedge->source()->degree() != 2) {
+			add_point_stop_ts(stop_ts, *p_curve, halfedge->source()->point());
+		}
+		if (halfedge->target()->degree() != 2) {
+			add_point_stop_ts(stop_ts, *p_curve, halfedge->target()->point());
+		}
+	}
+
+	std::sort(stop_ts.begin(), stop_ts.end());
+	stop_ts.erase(std::unique(stop_ts.begin(), stop_ts.end()), stop_ts.end());
+	return stop_ts;
+}
+
+PolyTRange expand_to_stops(const std::vector<float> &p_stop_ts, const PolyTRange &p_hit_range) {
+	if (p_stop_ts.empty()) {
+		return p_hit_range;
+	}
+
+	float expanded_from = p_stop_ts.front();
+	float expanded_to = p_stop_ts.back();
+	for (float stop_t : p_stop_ts) {
+		if (stop_t <= p_hit_range.from) {
+			expanded_from = stop_t;
+		}
+		if (stop_t >= p_hit_range.to) {
+			expanded_to = stop_t;
+			break;
+		}
+	}
+
+	return PolyTRange{ expanded_from, expanded_to };
+}
+
+} // namespace
+
 void Arrangement2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear"), &Arrangement2D::clear);
 	ClassDB::bind_method(D_METHOD("create_polyline", "id"), &Arrangement2D::create_polyline);
@@ -179,19 +413,31 @@ TypedArray<Dictionary> Arrangement2D::polyline_query_edges(PackedVector2Array p_
 	}
 
 	TypedArray<Dictionary> result{};
+	std::map<const CGAL::Curve *, std::vector<float>> stop_ts_cache;
 	for (auto halfedge : halfedges) {
-		CGAL::Point source_point = halfedge->source()->point();
-		CGAL::Point target_point = halfedge->target()->point();
-
 		for (auto curve_it = arrangement.originating_curves_begin(halfedge);
 				curve_it != arrangement.originating_curves_end(halfedge);
 				++curve_it) {
-			auto source_id_it = curve_handle_to_id.find(&(*curve_it));
-			CRASH_COND(source_id_it == curve_handle_to_id.end());
+			const CGAL::Curve *source_curve = &(*curve_it);
+			auto source_id_it = curve_handle_to_id.find(source_curve);
+			if (source_id_it == curve_handle_to_id.end()) {
+				WARN_PRINT_ONCE("Arrangement edge query found an unknown source curve.");
+				continue;
+			}
 			int64_t source_id = source_id_it->second;
-			float source_t = point_to_poly_t(*curve_it, source_point);
-			float target_t = point_to_poly_t(*curve_it, target_point);
-			result.push_back(make_edge_query_result(source_id, source_t, target_t));
+
+			auto [stop_ts_it, inserted] = stop_ts_cache.try_emplace(source_curve);
+			if (inserted) {
+				stop_ts_it->second = curve_stop_ts(arrangement, curve_it);
+			}
+
+			for (const PolyTRange &hit_range : halfedge_to_poly_ranges(*curve_it, halfedge)) {
+				PolyTRange expanded_range = expand_to_stops(stop_ts_it->second, hit_range);
+				if (expanded_range.to <= expanded_range.from) {
+					continue;
+				}
+				result.push_back(make_edge_query_result(source_id, expanded_range.from, expanded_range.to));
+			}
 		}
 	}
 	return result;
@@ -215,14 +461,13 @@ std::vector<CGAL::X_monotone_curve> Arrangement2D::construct_x_monotone_curves(P
 
 std::vector<CGAL::Face_const_handle> Arrangement2D::zone_query(const CGAL::X_monotone_curve &p_mono_curve) {
 	std::vector<CGAL::Face_const_handle> result{};
-	constexpr int MAX_RESULT = 256;
 	using Result = std::variant<CGAL::Arrangement::Vertex_handle, CGAL::Arrangement::Halfedge_handle, CGAL::Arrangement::Face_handle>;
-	std::vector<Result> output(MAX_RESULT);
-	auto begin_it = output.begin();
-	auto end_it = CGAL::zone(arrangement, p_mono_curve, begin_it, point_location);
+	std::vector<Result> output;
+	output.reserve(256);
+	CGAL::zone(arrangement, p_mono_curve, std::back_inserter(output), point_location);
 
-	for (auto it = begin_it; it != end_it; ++it) {
-		if (auto face_handle_ptr = std::get_if<CGAL::Arrangement::Face_handle>(&*it)) {
+	for (auto &object : output) {
+		if (auto face_handle_ptr = std::get_if<CGAL::Arrangement::Face_handle>(&object)) {
 			result.emplace_back(*face_handle_ptr);
 		}
 	}
@@ -232,14 +477,13 @@ std::vector<CGAL::Face_const_handle> Arrangement2D::zone_query(const CGAL::X_mon
 
 std::vector<CGAL::Halfedge_const_handle> Arrangement2D::zone_query_edges(const CGAL::X_monotone_curve &p_mono_curve) {
 	std::vector<CGAL::Halfedge_const_handle> result{};
-	constexpr int MAX_RESULT = 1024;
 	using Result = std::variant<CGAL::Arrangement::Vertex_handle, CGAL::Arrangement::Halfedge_handle, CGAL::Arrangement::Face_handle>;
-	std::vector<Result> output(MAX_RESULT);
-	auto begin_it = output.begin();
-	auto end_it = CGAL::zone(arrangement, p_mono_curve, begin_it, point_location);
+	std::vector<Result> output;
+	output.reserve(1024);
+	CGAL::zone(arrangement, p_mono_curve, std::back_inserter(output), point_location);
 
-	for (auto it = begin_it; it != end_it; ++it) {
-		if (auto halfedge_handle_ptr = std::get_if<CGAL::Arrangement::Halfedge_handle>(&*it)) {
+	for (auto &object : output) {
+		if (auto halfedge_handle_ptr = std::get_if<CGAL::Arrangement::Halfedge_handle>(&object)) {
 			result.emplace_back(*halfedge_handle_ptr);
 		}
 	}
@@ -253,41 +497,6 @@ Dictionary Arrangement2D::make_edge_query_result(int64_t p_source_id, float p_fr
 	result["from_t"] = p_from_t;
 	result["to_t"] = p_to_t;
 	return result;
-}
-
-float Arrangement2D::point_to_poly_t(const CGAL::Curve &p_curve, const CGAL::Point &p_point) {
-	auto begin_it = p_curve.points_begin();
-	auto end_it = p_curve.points_end();
-	if (begin_it == end_it) {
-		return 0.0f;
-	}
-
-	auto prev = begin_it;
-	int segment_index = 0;
-	for (auto next = std::next(begin_it); next != end_it; ++next, ++prev, ++segment_index) {
-		CGAL::Segment_traits::Compare_xy_2 compare_xy = CGAL::Segment_traits{}.compare_xy_2_object();
-		CGAL::Segment_traits::Collinear_are_ordered_along_line_2 ordered =
-				CGAL::Segment_traits{}.collinear_are_ordered_along_line_2_object();
-		if (compare_xy(*prev, p_point) == CGAL::EQUAL) {
-			return static_cast<float>(segment_index);
-		}
-		if (compare_xy(*next, p_point) == CGAL::EQUAL) {
-			return static_cast<float>(segment_index + 1);
-		}
-		if (!ordered(*prev, p_point, *next)) {
-			continue;
-		}
-
-		double dx = CGAL::to_double(next->x() - prev->x());
-		double dy = CGAL::to_double(next->y() - prev->y());
-		double numerator = std::abs(dx) >= std::abs(dy)
-				? CGAL::to_double(p_point.x() - prev->x())
-				: CGAL::to_double(p_point.y() - prev->y());
-		double denominator = std::abs(dx) >= std::abs(dy) ? dx : dy;
-		return static_cast<float>(segment_index + numerator / denominator);
-	}
-
-	return static_cast<float>(segment_index);
 }
 
 TypedArray<PackedVector2Array> Arrangement2D::get_polygon_from_face(RID p_id) {

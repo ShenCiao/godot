@@ -53,7 +53,6 @@ public:
 	std::vector<CGAL::Face_const_handle> zone_query(const CGAL::X_monotone_curve &p_mono_curve);
 	std::vector<CGAL::Halfedge_const_handle> zone_query_edges(const CGAL::X_monotone_curve &p_mono_curve);
 	Dictionary make_edge_query_result(int64_t p_source_id, float p_from_t, float p_to_t);
-	static float point_to_poly_t(const CGAL::Curve &p_curve, const CGAL::Point &p_point);
 	static std::vector<CGAL::X_monotone_curve> construct_x_monotone_curves(PackedVector2Array p_polyline);
 	static PackedVector2Array remove_consecutive_overlapping_points(PackedVector2Array p_polyline);
 	static std::vector<CGAL::Point> vector2_to_points(PackedVector2Array p_polyline);
