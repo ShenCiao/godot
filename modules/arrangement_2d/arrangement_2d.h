@@ -5,6 +5,7 @@
 
 #include "core/object/object.h"
 #include "core/templates/rid_owner.h"
+#include "core/typedefs.h"
 #include "core/variant/dictionary.h"
 #include "core/variant/typed_array.h"
 #include "core/variant/variant.h"
@@ -22,18 +23,18 @@ public:
 	CGAL::Arrangement arrangement;
 	CGAL::PointLocation point_location = { arrangement };
 
-	RID_Owner<CGAL::Curve_handle> curve_handle_owner;
 	RID_Owner<CGAL::Face_const_handle> face_handle_owner;
 	std::unordered_map<CGAL::Face_const_handle, RID> face_handle_to_rid;
-	std::unordered_map<const CGAL::Curve *, RID> curve_handle_to_rid;
+	std::unordered_map<int64_t, CGAL::Curve_handle> curve_handles;
+	std::unordered_map<const CGAL::Curve *, int64_t> curve_handle_to_id;
 
 	void _notification(int p_what);
 
 	Arrangement2D();
 
-	RID create_polyline();
-	void set_polyline(RID p_id, PackedVector2Array p_data); // Returns invalid face RIDs.
-	void remove_polyline(RID p_id);
+	void create_polyline(int64_t p_id);
+	void set_polyline(int64_t p_id, PackedVector2Array p_data); // Returns invalid face RIDs.
+	void remove_polyline(int64_t p_id);
 
 	RID point_query_face(Vector2 p_point);
 	TypedArray<RID> points_query_faces(PackedVector2Array p_points);
@@ -49,7 +50,7 @@ public:
 	RID cache_face_handle(CGAL::Face_const_handle p_handle);
 	std::vector<CGAL::Face_const_handle> zone_query(const CGAL::X_monotone_curve &p_mono_curve);
 	std::vector<CGAL::Halfedge_const_handle> zone_query_edges(const CGAL::X_monotone_curve &p_mono_curve);
-	Dictionary make_edge_query_result(RID p_source_id, float p_from_t, float p_to_t, Vector2 p_from_point, Vector2 p_to_point);
+	Dictionary make_edge_query_result(int64_t p_source_id, float p_from_t, float p_to_t);
 	static float point_to_poly_t(const CGAL::Curve &p_curve, const CGAL::Point &p_point);
 	static std::vector<CGAL::X_monotone_curve> construct_x_monotone_curves(PackedVector2Array p_polyline);
 	static PackedVector2Array remove_consecutive_overlapping_points(PackedVector2Array p_polyline);

@@ -18,7 +18,7 @@
 #include <variant>
 
 void Arrangement2D::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("create_polyline"), &Arrangement2D::create_polyline);
+	ClassDB::bind_method(D_METHOD("create_polyline", "id"), &Arrangement2D::create_polyline);
 	ClassDB::bind_method(D_METHOD("remove_polyline", "id"), &Arrangement2D::remove_polyline);
 	ClassDB::bind_method(D_METHOD("set_polyline", "id", "data"), &Arrangement2D::set_polyline);
 	ClassDB::bind_method(D_METHOD("point_query_face", "point"), &Arrangement2D::point_query_face);
@@ -34,63 +34,52 @@ void Arrangement2D::_bind_methods() {
 
 void Arrangement2D::_notification(int p_what) {
 	if (p_what == NOTIFICATION_PREDELETE) {
-		LocalVector<RID> rids = curve_handle_owner.get_owned_list();
-		for (const RID &id : rids) {
-			curve_handle_owner.free(id);
-		}
-
-		rids = face_handle_owner.get_owned_list();
+		LocalVector<RID> rids = face_handle_owner.get_owned_list();
 		for (const RID &id : rids) {
 			face_handle_owner.free(id);
 		}
 		face_handle_to_rid.clear();
-		curve_handle_to_rid.clear();
+		curve_handles.clear();
+		curve_handle_to_id.clear();
 	}
 }
 
 Arrangement2D::Arrangement2D() {
 }
 
-RID Arrangement2D::create_polyline() {
-	return curve_handle_owner.make_rid({});
+void Arrangement2D::create_polyline(int64_t p_id) {
+	CGAL::Curve_handle curve_handle = curve_handles[p_id];
+	if (curve_handle != nullptr) {
+		curve_handle_to_id.erase(&(*curve_handle));
+		CGAL::remove_curve(arrangement, curve_handle);
+	}
+	curve_handles[p_id] = nullptr;
 }
 
-void Arrangement2D::set_polyline(RID p_id, PackedVector2Array p_data) {
-	CGAL::Curve_handle *ptr = curve_handle_owner.get_or_null(p_id);
-	if (ptr == nullptr) {
-		ERR_PRINT(vformat("Given RID %d is not a polyline.", p_id.get_id()));
-		return;
-	}
-
-	CGAL::Curve_handle curve_handle = *ptr;
+void Arrangement2D::set_polyline(int64_t p_id, PackedVector2Array p_data) {
+	CGAL::Curve_handle curve_handle = curve_handles[p_id];
 	if (curve_handle != nullptr) {
-		curve_handle_to_rid.erase(&(*curve_handle));
+		curve_handle_to_id.erase(&(*curve_handle));
 		CGAL::remove_curve(arrangement, curve_handle);
-		*ptr = nullptr;
+		curve_handles[p_id] = nullptr;
 	}
-
 	p_data = remove_consecutive_overlapping_points(p_data);
 	if (p_data.size() < 2) {
 		return;
 	}
 	CGAL::Curve curve = curve_constructor(vector2_to_points(p_data));
 	auto handle = CGAL::insert(arrangement, curve);
-	*ptr = handle;
-	curve_handle_to_rid[&(*handle)] = p_id;
+	curve_handles[p_id] = handle;
+	curve_handle_to_id[&(*handle)] = p_id;
 }
 
-void Arrangement2D::remove_polyline(RID p_id) {
-	CGAL::Curve_handle *ptr = curve_handle_owner.get_or_null(p_id);
-	if (ptr == nullptr) {
-		ERR_PRINT(vformat("Given RID %d is not a polyline.", p_id.get_id()));
-		return;
-	}
-	CGAL::Curve_handle curve_handle = *ptr;
-	curve_handle_owner.free(p_id);
+void Arrangement2D::remove_polyline(int64_t p_id) {
+	CGAL::Curve_handle curve_handle = curve_handles[p_id];
 	if (curve_handle != nullptr) {
-		curve_handle_to_rid.erase(&(*curve_handle));
+		curve_handle_to_id.erase(&(*curve_handle));
 		CGAL::remove_curve(arrangement, curve_handle);
 	}
+	curve_handles.erase(p_id);
 }
 
 RID Arrangement2D::point_query_face(Vector2 p_point) {
@@ -175,18 +164,16 @@ TypedArray<Dictionary> Arrangement2D::polyline_query_edges(PackedVector2Array p_
 	for (auto halfedge : halfedges) {
 		CGAL::Point source_point = halfedge->source()->point();
 		CGAL::Point target_point = halfedge->target()->point();
-		Vector2 source_vector = point_to_vector2(source_point);
-		Vector2 target_vector = point_to_vector2(target_point);
 
 		for (auto curve_it = arrangement.originating_curves_begin(halfedge);
 				curve_it != arrangement.originating_curves_end(halfedge);
 				++curve_it) {
-			auto source_id_it = curve_handle_to_rid.find(&(*curve_it));
-			CRASH_COND(source_id_it == curve_handle_to_rid.end());
-			RID source_id = source_id_it->second;
+			auto source_id_it = curve_handle_to_id.find(&(*curve_it));
+			CRASH_COND(source_id_it == curve_handle_to_id.end());
+			int64_t source_id = source_id_it->second;
 			float source_t = point_to_poly_t(*curve_it, source_point);
 			float target_t = point_to_poly_t(*curve_it, target_point);
-			result.push_back(make_edge_query_result(source_id, source_t, target_t, source_vector, target_vector));
+			result.push_back(make_edge_query_result(source_id, source_t, target_t));
 		}
 	}
 	return result;
@@ -242,13 +229,11 @@ std::vector<CGAL::Halfedge_const_handle> Arrangement2D::zone_query_edges(const C
 	return result;
 }
 
-Dictionary Arrangement2D::make_edge_query_result(RID p_source_id, float p_from_t, float p_to_t, Vector2 p_from_point, Vector2 p_to_point) {
+Dictionary Arrangement2D::make_edge_query_result(int64_t p_source_id, float p_from_t, float p_to_t) {
 	Dictionary result{};
-	result["source_rid"] = p_source_id;
+	result["source_id"] = p_source_id;
 	result["from_t"] = p_from_t;
 	result["to_t"] = p_to_t;
-	result["from_point"] = p_from_point;
-	result["to_point"] = p_to_point;
 	return result;
 }
 
