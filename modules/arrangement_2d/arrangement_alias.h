@@ -25,6 +25,7 @@ namespace CGAL {
 	using Geom_traits = CGAL::Arr_polyline_traits_2<Segment_traits>;
 
 	using Point = Geom_traits::Point_2;
+	using Segment = Kernel::Segment_2;
 	using Curve = Geom_traits::Curve_2; // Curve_2 is polyline, its subcurves are straight segments, use source() and target() to get points.
 	using X_monotone_curve = Geom_traits::X_monotone_curve_2;
 
