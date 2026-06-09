@@ -48,25 +48,25 @@ float Arrangement2D::curve_last_t(const CGAL::Curve &p_curve) {
 }
 
 Arrangement2D::GapBridgeSourceCurveInfo Arrangement2D::make_gap_bridge_source_curve_metadata(CurveConstHandle p_curve) const {
-	GapBridgeSourceCurveInfo metadata{};
+	GapBridgeSourceCurveInfo source_info{};
 	auto curve_id_it = curve_handle_to_id.find(&(*p_curve));
 	if (curve_id_it == curve_handle_to_id.end()) {
-		return metadata;
+		return source_info;
 	}
 
-	metadata.curve_id = curve_id_it->second;
-	metadata.is_closed = curve_is_closed(*p_curve);
-	metadata.last_t = curve_last_t(*p_curve);
+	source_info.curve_id = curve_id_it->second;
+	source_info.is_closed = curve_is_closed(*p_curve);
+	source_info.last_t = curve_last_t(*p_curve);
 
 	auto prev = p_curve->points_begin();
 	auto end_it = p_curve->points_end();
 	int segment_index = 0;
 	for (auto next = std::next(prev); prev != end_it && next != end_it; ++next, ++prev, ++segment_index) {
 		if (!points_equal(*prev, *next)) {
-			metadata.segments.push_back({ *prev, *next, segment_index });
+			source_info.segments.push_back({ *prev, *next, segment_index });
 		}
 	}
-	return metadata;
+	return source_info;
 }
 
 std::optional<Vector2> Arrangement2D::outward_tangent_for_open_endpoint(const GapBridgeSourceCurveSegment &p_segment, bool p_is_start) {

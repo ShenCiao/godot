@@ -27,12 +27,16 @@ if not os.path.exists(conan_deps):
 conandeps = SConscript(conan_deps)
 conan_flags = conandeps["conandeps"]
 
-for key in ["CPPPATH", "CPPDEFINES", "CCFLAGS", "CXXFLAGS"]:
+for key in ["CPPDEFINES", "CCFLAGS", "CXXFLAGS"]:
     if key in conan_flags:
         env_arrangement_2d.Append(**{key: conan_flags[key]})
 
 if env.msvc:
-    env_arrangement_2d.Append(CCFLAGS=["/EHsc"])
+    env_arrangement_2d.Append(CCFLAGS=["/EHsc", "/external:W0"])
+    for include_dir in conan_flags.get("CPPPATH", []):
+        env_arrangement_2d.Append(CCFLAGS=[f"/external:I{include_dir}"])
+elif "CPPPATH" in conan_flags:
+    env_arrangement_2d.Append(CPPPATH=conan_flags["CPPPATH"])
 
 if "LIBPATH" in conan_flags:
     env.Append(LIBPATH=conan_flags["LIBPATH"])
