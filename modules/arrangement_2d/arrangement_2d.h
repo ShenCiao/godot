@@ -22,6 +22,7 @@ protected:
 public:
 	CGAL::Arrangement arrangement;
 	CGAL::PointLocation point_location = { arrangement };
+	ArrangementObserver observer{ arrangement };
 
 	RID_Owner<CGAL::Face_const_handle> face_handle_owner;
 	std::unordered_map<CGAL::Face_const_handle, RID> face_handle_to_rid;
@@ -41,6 +42,7 @@ public:
 	TypedArray<RID> points_query_faces(PackedVector2Array p_points);
 	TypedArray<RID> polyline_query_faces(PackedVector2Array p_polyline); // Returns face RIDs.
 	TypedArray<Dictionary> polyline_query_edges(PackedVector2Array p_polyline);
+	TypedArray<RID> get_all_faces();
 	TypedArray<PackedVector2Array> get_polygon_from_face(RID p_id);
 	Dictionary get_triangles_from_face(RID p_id);
 	bool is_unbounded_face(RID p_id);
@@ -49,6 +51,7 @@ public:
 	static Dictionary repair_and_triangulate(TypedArray<PackedVector2Array> p_polygons);
 
 	void clear_face_cache();
+	void invalidate_face(CGAL::Face_const_handle p_handle);
 	RID cache_face_handle(CGAL::Face_const_handle p_handle);
 	std::vector<CGAL::Face_const_handle> zone_query(const CGAL::X_monotone_curve &p_mono_curve);
 	std::vector<CGAL::Halfedge_const_handle> zone_query_edges(const CGAL::X_monotone_curve &p_mono_curve);

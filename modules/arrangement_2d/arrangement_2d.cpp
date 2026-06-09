@@ -260,6 +260,7 @@ void Arrangement2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("polyline_query_faces", "polyline"), &Arrangement2D::polyline_query_faces);
 	ClassDB::bind_method(D_METHOD("polyline_query_edges", "polyline"), &Arrangement2D::polyline_query_edges);
 	ClassDB::bind_method(D_METHOD("points_query_faces", "points"), &Arrangement2D::points_query_faces);
+	ClassDB::bind_method(D_METHOD("get_all_faces"), &Arrangement2D::get_all_faces);
 	ClassDB::bind_method(D_METHOD("get_polygon_from_face", "face_id"), &Arrangement2D::get_polygon_from_face);
 	ClassDB::bind_method(D_METHOD("get_triangles_from_face", "face_id"), &Arrangement2D::get_triangles_from_face);
 	ClassDB::bind_method(D_METHOD("is_unbounded_face", "id"), &Arrangement2D::is_unbounded_face);
@@ -274,6 +275,7 @@ void Arrangement2D::_notification(int p_what) {
 }
 
 Arrangement2D::Arrangement2D() {
+	observer.arrangement_2d = this;
 }
 
 void Arrangement2D::clear() {
@@ -284,7 +286,6 @@ void Arrangement2D::clear() {
 }
 
 void Arrangement2D::create_polyline(int64_t p_id) {
-	clear_face_cache();
 	CGAL::Curve_handle curve_handle = curve_handles[p_id];
 	if (curve_handle != nullptr) {
 		curve_handle_to_id.erase(&(*curve_handle));
@@ -294,7 +295,6 @@ void Arrangement2D::create_polyline(int64_t p_id) {
 }
 
 void Arrangement2D::set_polyline(int64_t p_id, PackedVector2Array p_data) {
-	clear_face_cache();
 	CGAL::Curve_handle curve_handle = curve_handles[p_id];
 	if (curve_handle != nullptr) {
 		curve_handle_to_id.erase(&(*curve_handle));
@@ -319,7 +319,6 @@ void Arrangement2D::remove_polyline(int64_t p_id) {
 
 	CGAL::Curve_handle curve_handle = curve_handle_it->second;
 	if (curve_handle != nullptr) {
-		clear_face_cache();
 		curve_handle_to_id.erase(&(*curve_handle));
 		CGAL::remove_curve(arrangement, curve_handle);
 	}
@@ -341,6 +340,15 @@ void Arrangement2D::clear_face_cache() {
 		face_handle_owner.free(id);
 	}
 	face_handle_to_rid.clear();
+}
+
+void Arrangement2D::invalidate_face(CGAL::Face_const_handle p_handle) {
+	const auto rid_it = face_handle_to_rid.find(p_handle);
+	if (rid_it == face_handle_to_rid.end()) {
+		return;
+	}
+	face_handle_owner.free(rid_it->second);
+	face_handle_to_rid.erase(rid_it);
 }
 
 RID Arrangement2D::cache_face_handle(CGAL::Face_const_handle p_handle) {
@@ -496,6 +504,14 @@ Dictionary Arrangement2D::make_edge_query_result(int64_t p_source_id, float p_fr
 	result["source_id"] = p_source_id;
 	result["from_t"] = p_from_t;
 	result["to_t"] = p_to_t;
+	return result;
+}
+
+TypedArray<RID> Arrangement2D::get_all_faces() {
+	TypedArray<RID> result{};
+	for (auto face_it = arrangement.faces_begin(); face_it != arrangement.faces_end(); ++face_it) {
+		result.push_back(cache_face_handle(face_it));
+	}
 	return result;
 }
 
