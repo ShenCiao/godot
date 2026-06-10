@@ -76,7 +76,11 @@ private:
 	struct GapBridgeEndpointRef {
 		int64_t curve_id = 0;
 		float t = 0.0f;
-		bool anchor = false;
+		// A dangling endpoint is a degree-1 arrangement vertex.
+		bool dangling = false;
+		// Measured on the local arrangement subcurve after intersections split it,
+		// so tiny T-junction protrusions can be filtered even on longer sources.
+		bool dangling_subcurve_long_enough = false;
 		std::optional<Vector2> outward_tangent;
 	};
 
@@ -92,6 +96,7 @@ private:
 		GapBridgeEndpointRef from;
 		GapBridgeEndpointRef to;
 		double score = 0.0;
+		double distance_squared = 0.0;
 	};
 
 	struct GapBridgeSourceCurveSegment {
@@ -131,14 +136,15 @@ private:
 	static PolyTRange expand_to_stops(const std::vector<float> &p_stop_ts, const PolyTRange &p_hit_range);
 
 	// Gap bridge implementation.
-	GapBridgeCdt construct_gap_bridge_cdt(const std::vector<CGAL::Arrangement::Curve_const_handle> &p_curves);
+	GapBridgeCdt construct_gap_bridge_cdt(const std::vector<CGAL::Arrangement::Curve_const_handle> &p_curves, double p_min_dangling_subcurve_length);
 	GapBridgeSourceCurveInfo make_gap_bridge_source_curve_metadata(CGAL::Arrangement::Curve_const_handle p_curve) const;
-	void append_gap_bridge_source_constraint_segments(CGAL::Arrangement::Curve_const_handle p_curve, const GapBridgeSourceCurveInfo &p_metadata, std::vector<CGAL::Segment> &r_segments, std::map<CGAL::Point, GapBridgeEndpointRefs, PointLess> &r_point_to_refs) const;
+	void append_gap_bridge_source_constraint_segments(CGAL::Arrangement::Curve_const_handle p_curve, const GapBridgeSourceCurveInfo &p_metadata, double p_min_dangling_subcurve_length, std::vector<CGAL::Segment> &r_segments, std::map<CGAL::Point, GapBridgeEndpointRefs, PointLess> &r_point_to_refs) const;
 	static GapBridgeEndpointKey gap_bridge_endpoint_key(const GapBridgeEndpointRef &p_ref);
 	static bool curve_is_closed(const CGAL::Curve &p_curve);
 	static float curve_last_t(const CGAL::Curve &p_curve);
-	static std::optional<Vector2> outward_tangent_for_open_endpoint(const GapBridgeSourceCurveSegment &p_segment, bool p_is_start);
-	static GapBridgeEndpointRef gap_bridge_endpoint_ref_from_source_segment(const GapBridgeSourceCurveInfo &p_metadata, const GapBridgeSourceCurveSegment &p_segment, const CGAL::Point &p_point, int p_vertex_degree);
+	static bool curve_length_at_least(const CGAL::Curve &p_curve, double p_min_length);
+	static std::optional<Vector2> outward_tangent_for_source_endpoint(const GapBridgeSourceCurveSegment &p_segment, bool p_is_start);
+	static GapBridgeEndpointRef gap_bridge_endpoint_ref_from_source_segment(const GapBridgeSourceCurveInfo &p_metadata, const GapBridgeSourceCurveSegment &p_segment, const CGAL::Point &p_point, int p_vertex_degree, bool p_subcurve_long_enough);
 	static void append_unique_gap_bridge_endpoint_ref(GapBridgeEndpointRefs &r_refs, const GapBridgeEndpointRef &p_ref);
 	static int degree_for_halfedge_point(CGAL::Halfedge_const_handle p_halfedge, const CGAL::Point &p_point);
 	static double gap_bridge_tangent_bonus(const GapBridgeEndpointRef &p_ref, const CGAL::Point &p_ref_point, const CGAL::Point &p_other_point);
