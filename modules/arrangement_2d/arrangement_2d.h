@@ -50,7 +50,10 @@ public:
 	RID point_query_face(Vector2 p_point);
 	TypedArray<RID> points_query_faces(PackedVector2Array p_points);
 	TypedArray<RID> polyline_query_faces(PackedVector2Array p_polyline); // Returns face RIDs.
+	PackedInt64Array polyline_query_curves(PackedVector2Array p_polyline);
 	TypedArray<Dictionary> polyline_query_edges(PackedVector2Array p_polyline);
+	Vector2 get_curve_endpoint_junction_lengths(int64_t p_curve_id);
+	Dictionary get_curve_endpoint_info(int64_t p_curve_id);
 	TypedArray<Dictionary> get_gap_bridge_candidates(double p_max_gap_length);
 	TypedArray<RID> get_all_faces();
 	TypedArray<PackedVector2Array> get_polygon_from_face(RID p_id);
@@ -66,6 +69,12 @@ private:
 	struct PolyTRange {
 		float from = 0.0f;
 		float to = 0.0f;
+	};
+
+	struct SourceCurveHit {
+		CGAL::Halfedge_const_handle halfedge;
+		CGAL::Arrangement::Curve_const_handle source_curve;
+		int64_t source_id = 0;
 	};
 
 	struct PointLess {
@@ -125,7 +134,17 @@ private:
 	std::vector<CGAL::Halfedge_const_handle> zone_query_edges(const CGAL::X_monotone_curve &p_mono_curve);
 
 	// Edge query implementation.
+	std::vector<SourceCurveHit> collect_polyline_query_source_hits(PackedVector2Array p_polyline);
 	Dictionary make_edge_query_result(int64_t p_source_id, float p_from_t, float p_to_t);
+	Vector2 curve_endpoint_junction_lengths(CGAL::Arrangement::Curve_const_handle p_curve);
+	Dictionary make_curve_endpoint_info(CGAL::Arrangement::Curve_const_handle p_curve);
+	double curve_endpoint_junction_length(CGAL::Arrangement::Curve_const_handle p_curve, const CGAL::Point &p_endpoint, const CGAL::Point &p_next_source_point);
+	bool curve_endpoint_is_dangling(CGAL::Arrangement::Curve_const_handle p_curve, const CGAL::Point &p_endpoint, const CGAL::Point &p_next_source_point);
+	std::optional<CGAL::Halfedge_const_handle> source_halfedge_from_endpoint(CGAL::Arrangement::Curve_const_handle p_curve, const CGAL::Point &p_endpoint, const CGAL::Point &p_next_source_point);
+	std::optional<CGAL::Halfedge_const_handle> next_source_halfedge(CGAL::Arrangement::Curve_const_handle p_curve, CGAL::Vertex_const_handle p_vertex, CGAL::Halfedge_const_handle p_previous);
+	static bool x_monotone_curve_leaves_endpoint_toward(const CGAL::X_monotone_curve &p_curve, const CGAL::Point &p_endpoint, const CGAL::Point &p_next_source_point);
+	static double point_distance(const CGAL::Point &p_a, const CGAL::Point &p_b);
+	static double x_monotone_curve_length(const CGAL::X_monotone_curve &p_curve);
 	static std::vector<float> point_to_poly_ts(const CGAL::Curve &p_curve, const CGAL::Point &p_point);
 	static std::vector<PolyTRange> subedge_to_poly_ranges(const CGAL::Curve &p_curve, const CGAL::Point &p_from, const CGAL::Point &p_to);
 	static std::vector<PolyTRange> halfedge_to_poly_ranges(const CGAL::Curve &p_curve, CGAL::Halfedge_const_handle p_halfedge);
