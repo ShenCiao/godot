@@ -2,12 +2,6 @@
 
 #include <cmath>
 
-bool Arrangement2D::PointLess::operator()(const CGAL::Point &p_a, const CGAL::Point &p_b) const {
-	CGAL::Segment_traits traits;
-	CGAL::Segment_traits::Compare_xy_2 compare_xy = traits.compare_xy_2_object();
-	return compare_xy(p_a, p_b) == CGAL::SMALLER;
-}
-
 bool Arrangement2D::points_equal(const CGAL::Point &p_a, const CGAL::Point &p_b) {
 	CGAL::Segment_traits traits;
 	CGAL::Segment_traits::Compare_xy_2 compare_xy = traits.compare_xy_2_object();
@@ -35,8 +29,4 @@ double Arrangement2D::segment_fraction(const CGAL::Point &p_from, const CGAL::Po
 		return 0.0;
 	}
 	return numerator / denominator;
-}
-
-int64_t Arrangement2D::quantize_t(float p_t) {
-	return static_cast<int64_t>(std::llround(static_cast<double>(p_t) / 0.0001));
 }

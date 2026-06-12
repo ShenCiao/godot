@@ -10,9 +10,6 @@
 #include "core/variant/typed_array.h"
 #include "core/variant/variant.h"
 
-#include <CGAL/Triangulation_vertex_base_with_info_2.h>
-
-#include <map>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -54,7 +51,6 @@ public:
 	TypedArray<Dictionary> polyline_query_edges(PackedVector2Array p_polyline);
 	Vector2 get_curve_endpoint_junction_lengths(int64_t p_curve_id);
 	Dictionary get_curve_endpoint_info(int64_t p_curve_id);
-	TypedArray<Dictionary> get_gap_bridge_candidates(double p_max_gap_length);
 	TypedArray<RID> get_all_faces();
 	TypedArray<PackedVector2Array> get_polygon_from_face(RID p_id);
 	Dictionary get_triangles_from_face(RID p_id);
@@ -76,55 +72,6 @@ private:
 		CGAL::Arrangement::Curve_const_handle source_curve;
 		int64_t source_id = 0;
 	};
-
-	struct PointLess {
-		bool operator()(const CGAL::Point &p_a, const CGAL::Point &p_b) const;
-	};
-
-	// Gap bridge support types.
-	struct GapBridgeEndpointRef {
-		int64_t curve_id = 0;
-		float t = 0.0f;
-		// A dangling endpoint is a degree-1 arrangement vertex.
-		bool dangling = false;
-		// Measured on the local arrangement subcurve after intersections split it,
-		// so tiny T-junction protrusions can be filtered even on longer sources.
-		bool dangling_subcurve_long_enough = false;
-		std::optional<Vector2> outward_tangent;
-	};
-
-	struct GapBridgeEndpointKey {
-		int64_t curve_id = 0;
-		int64_t quantized_t = 0;
-
-		bool operator<(const GapBridgeEndpointKey &p_other) const;
-		bool operator==(const GapBridgeEndpointKey &p_other) const;
-	};
-
-	struct GapBridgeCandidate {
-		GapBridgeEndpointRef from;
-		GapBridgeEndpointRef to;
-		double score = 0.0;
-		double distance_squared = 0.0;
-	};
-
-	struct GapBridgeSourceCurveSegment {
-		CGAL::Point from;
-		CGAL::Point to;
-		int index = 0;
-	};
-
-	struct GapBridgeSourceCurveInfo {
-		int64_t curve_id = 0;
-		bool is_closed = false;
-		float last_t = 0.0f;
-		std::vector<GapBridgeSourceCurveSegment> segments;
-	};
-
-	using GapBridgeEndpointRefs = std::vector<GapBridgeEndpointRef>;
-	using GapBridgeCdtVertexBase = CGAL::Triangulation_vertex_base_with_info_2<GapBridgeEndpointRefs, CGAL::Kernel>;
-	using GapBridgeCdtDataStructure = CGAL::Triangulation_data_structure_2<GapBridgeCdtVertexBase, CGAL::CdtFaceBase2>;
-	using GapBridgeCdt = CGAL::Constrained_Delaunay_triangulation_2<CGAL::Kernel, GapBridgeCdtDataStructure, CGAL::Exact_intersections_tag>;
 
 	// Face handle cache and arrangement traversal.
 	void clear_face_cache();
@@ -154,26 +101,10 @@ private:
 	static std::vector<float> curve_stop_ts(CGAL::Arrangement &p_arrangement, CGAL::Arrangement::Curve_const_handle p_curve);
 	static PolyTRange expand_to_stops(const std::vector<float> &p_stop_ts, const PolyTRange &p_hit_range);
 
-	// Gap bridge implementation.
-	GapBridgeCdt construct_gap_bridge_cdt(const std::vector<CGAL::Arrangement::Curve_const_handle> &p_curves, double p_min_dangling_subcurve_length);
-	GapBridgeSourceCurveInfo make_gap_bridge_source_curve_metadata(CGAL::Arrangement::Curve_const_handle p_curve) const;
-	void append_gap_bridge_source_constraint_segments(CGAL::Arrangement::Curve_const_handle p_curve, const GapBridgeSourceCurveInfo &p_metadata, double p_min_dangling_subcurve_length, std::vector<CGAL::Segment> &r_segments, std::map<CGAL::Point, GapBridgeEndpointRefs, PointLess> &r_point_to_refs) const;
-	static GapBridgeEndpointKey gap_bridge_endpoint_key(const GapBridgeEndpointRef &p_ref);
-	static bool curve_is_closed(const CGAL::Curve &p_curve);
-	static float curve_last_t(const CGAL::Curve &p_curve);
-	static bool curve_length_at_least(const CGAL::Curve &p_curve, double p_min_length);
-	static std::optional<Vector2> outward_tangent_for_source_endpoint(const GapBridgeSourceCurveSegment &p_segment, bool p_is_start);
-	static GapBridgeEndpointRef gap_bridge_endpoint_ref_from_source_segment(const GapBridgeSourceCurveInfo &p_metadata, const GapBridgeSourceCurveSegment &p_segment, const CGAL::Point &p_point, int p_vertex_degree, bool p_subcurve_long_enough);
-	static void append_unique_gap_bridge_endpoint_ref(GapBridgeEndpointRefs &r_refs, const GapBridgeEndpointRef &p_ref);
-	static int degree_for_halfedge_point(CGAL::Halfedge_const_handle p_halfedge, const CGAL::Point &p_point);
-	static double gap_bridge_tangent_bonus(const GapBridgeEndpointRef &p_ref, const CGAL::Point &p_ref_point, const CGAL::Point &p_other_point);
-	static Dictionary make_gap_bridge_candidate_result(const GapBridgeCandidate &p_candidate);
-
 	// Shared geometry predicates and source curve conversion.
 	static bool points_equal(const CGAL::Point &p_a, const CGAL::Point &p_b);
 	static bool point_on_segment(const CGAL::Point &p_from, const CGAL::Point &p_point, const CGAL::Point &p_to);
 	static double segment_fraction(const CGAL::Point &p_from, const CGAL::Point &p_to, const CGAL::Point &p_point);
-	static int64_t quantize_t(float p_t);
 	static std::vector<CGAL::X_monotone_curve> construct_x_monotone_curves(PackedVector2Array p_polyline);
 	static PackedVector2Array remove_consecutive_overlapping_points(PackedVector2Array p_polyline);
 	static std::vector<CGAL::Point> vector2_to_points(PackedVector2Array p_polyline);

@@ -27,7 +27,6 @@ void Arrangement2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("polyline_query_edges", "polyline"), &Arrangement2D::polyline_query_edges);
 	ClassDB::bind_method(D_METHOD("get_curve_endpoint_junction_lengths", "curve_id"), &Arrangement2D::get_curve_endpoint_junction_lengths);
 	ClassDB::bind_method(D_METHOD("get_curve_endpoint_info", "curve_id"), &Arrangement2D::get_curve_endpoint_info);
-	ClassDB::bind_method(D_METHOD("get_gap_bridge_candidates", "max_gap_length"), &Arrangement2D::get_gap_bridge_candidates);
 	ClassDB::bind_method(D_METHOD("points_query_faces", "points"), &Arrangement2D::points_query_faces);
 	ClassDB::bind_method(D_METHOD("get_all_faces"), &Arrangement2D::get_all_faces);
 	ClassDB::bind_method(D_METHOD("get_polygon_from_face", "face_id"), &Arrangement2D::get_polygon_from_face);
