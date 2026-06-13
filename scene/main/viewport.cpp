@@ -1265,8 +1265,8 @@ void Viewport::_canvas_layer_remove(CanvasLayer *p_canvas_layer) {
 
 void Viewport::set_transparent_background(bool p_enable) {
 	ERR_MAIN_THREAD_GUARD;
-	transparent_bg = p_enable;
 	RS::get_singleton()->viewport_set_transparent_background(viewport, p_enable);
+	transparent_bg = p_enable;
 }
 
 bool Viewport::has_transparent_background() const {
