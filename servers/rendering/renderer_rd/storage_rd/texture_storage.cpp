@@ -4171,6 +4171,19 @@ Rect2i TextureStorage::_render_target_get_sdf_rect(const RenderTarget *rt) const
 	return r;
 }
 
+bool TextureStorage::_render_target_get_clamped_region(const RenderTarget *rt, const Rect2i &p_region, Rect2i &r_region) const {
+	if (p_region == Rect2i()) {
+		r_region.position = Point2i();
+		r_region.size = rt->size;
+	} else {
+		r_region = Rect2i(Size2i(), rt->size).intersection(p_region);
+		if (r_region.size == Size2i()) {
+			return false;
+		}
+	}
+	return true;
+}
+
 Rect2i TextureStorage::render_target_get_sdf_rect(RID p_render_target) const {
 	const RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
 	ERR_FAIL_NULL_V(rt, Rect2i());
@@ -4426,13 +4439,8 @@ void TextureStorage::render_target_copy_to_back_buffer(RID p_render_target, cons
 	}
 
 	Rect2i region;
-	if (p_region == Rect2i()) {
-		region.size = rt->size;
-	} else {
-		region = Rect2i(Size2i(), rt->size).intersection(p_region);
-		if (region.size == Size2i()) {
-			return; //nothing to do
-		}
+	if (!_render_target_get_clamped_region(rt, p_region, region)) {
+		return;
 	}
 
 	// TODO figure out stereo support here
@@ -4484,13 +4492,8 @@ void TextureStorage::render_target_clear_back_buffer(RID p_render_target, const 
 	}
 
 	Rect2i region;
-	if (p_region == Rect2i()) {
-		region.size = rt->size;
-	} else {
-		region = Rect2i(Size2i(), rt->size).intersection(p_region);
-		if (region.size == Size2i()) {
-			return; //nothing to do
-		}
+	if (!_render_target_get_clamped_region(rt, p_region, region)) {
+		return;
 	}
 
 	// Single texture copy for backbuffer.
@@ -4513,13 +4516,8 @@ void TextureStorage::render_target_gen_back_buffer_mipmaps(RID p_render_target, 
 	}
 
 	Rect2i region;
-	if (p_region == Rect2i()) {
-		region.size = rt->size;
-	} else {
-		region = Rect2i(Size2i(), rt->size).intersection(p_region);
-		if (region.size == Size2i()) {
-			return; //nothing to do
-		}
+	if (!_render_target_get_clamped_region(rt, p_region, region)) {
+		return;
 	}
 	RD::get_singleton()->draw_command_begin_label("Gaussian Blur Mipmaps Pass 2");
 	//then mipmap blur
@@ -4544,6 +4542,43 @@ void TextureStorage::render_target_gen_back_buffer_mipmaps(RID p_render_target, 
 	RD::get_singleton()->draw_command_end_label();
 }
 
+TextureStorage::CanvasGroupBufferRIDs TextureStorage::render_target_prepare_canvas_group_buffer_for_draw(RID p_render_target, int p_index, const Color &p_clear_color) {
+	CanvasGroupBufferRIDs result;
+
+	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
+	ERR_FAIL_NULL_V(rt, result);
+	ERR_FAIL_COND_V(p_index < 0, result);
+
+	if (p_index >= rt->canvas_group_buffers.size() || !rt->canvas_group_buffers[p_index].texture.is_valid()) {
+		_create_render_target_canvas_group_buffer(rt, p_index);
+	}
+
+	RenderTarget::CanvasGroupBuffer &buffer = rt->canvas_group_buffers.write[p_index];
+
+	Rect2i region;
+	if (_render_target_get_clamped_region(rt, Rect2i(), region)) {
+		// RD hazard workaround:
+		// Not using a framebuffer attachment clear for this. CanvasGroup children
+		// render through buffer.mipmap0, a shared slice view, but the group is later
+		// composited by sampling buffer.texture, the owner texture. Relying on a
+		// render-pass loadOp clear for the slice seems leave a GPU resource hazard where
+		// the clear is not reliably visible to the later owner-texture sample.
+		// Clear the texture view explicitly for workaround.
+		// Not tried add_synchronization(), may be too blunt and hurt performance
+		CopyEffects *copy_effects = CopyEffects::get_singleton();
+		ERR_FAIL_NULL_V(copy_effects, result);
+		if (RendererSceneRenderRD::get_singleton()->_render_buffers_can_be_storage()) {
+			copy_effects->set_color(buffer.mipmap0, p_clear_color, region, !rt->use_hdr);
+		} else {
+			copy_effects->set_color_raster(buffer.mipmap0, p_clear_color, region);
+		}
+	}
+
+	result.texture = buffer.texture;
+	result.framebuffer = buffer.framebuffer;
+	return result;
+}
+
 void TextureStorage::render_target_gen_canvas_group_buffer_mipmaps(RID p_render_target, int p_index, const Rect2i &p_region) {
 	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
 	ERR_FAIL_NULL(rt);
@@ -4557,13 +4592,8 @@ void TextureStorage::render_target_gen_canvas_group_buffer_mipmaps(RID p_render_
 	}
 
 	Rect2i region;
-	if (p_region == Rect2i()) {
-		region.size = rt->size;
-	} else {
-		region = Rect2i(Size2i(), rt->size).intersection(p_region);
-		if (region.size == Size2i()) {
-			return;
-		}
+	if (!_render_target_get_clamped_region(rt, p_region, region)) {
+		return;
 	}
 
 	RenderTarget::CanvasGroupBuffer &buffer = rt->canvas_group_buffers.write[p_index];

@@ -669,7 +669,7 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 
 	RID _create_base_uniform_set(RID p_to_render_target, bool p_backbuffer);
 	RID _create_base_uniform_set(RID p_to_render_target, RID p_screen_texture);
-	RID _ensure_canvas_group_buffer_uniform_set(RID p_to_render_target, int p_index);
+	RID _ensure_canvas_group_buffer_uniform_set(RID p_to_render_target, int p_index, RID p_texture);
 
 	bool debug_redraw = false;
 	Color debug_redraw_color;

@@ -476,12 +476,12 @@ RID RendererCanvasRenderRD::_create_base_uniform_set(RID p_to_render_target, RID
 	return RD::get_singleton()->uniform_set_create(uniforms, shader.default_version_rd_shader, BASE_UNIFORM_SET);
 }
 
-RID RendererCanvasRenderRD::_ensure_canvas_group_buffer_uniform_set(RID p_to_render_target, int p_index) {
+RID RendererCanvasRenderRD::_ensure_canvas_group_buffer_uniform_set(RID p_to_render_target, int p_index, RID p_texture) {
 	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
 
 	RID uniform_set = texture_storage->render_target_get_canvas_group_buffer_uniform_set(p_to_render_target, p_index);
 	if (uniform_set.is_null() || !RD::get_singleton()->uniform_set_is_valid(uniform_set)) {
-		RID screen = texture_storage->render_target_get_rd_canvas_group_buffer(p_to_render_target, p_index);
+		RID screen = p_texture.is_valid() ? p_texture : texture_storage->render_target_get_rd_canvas_group_buffer(p_to_render_target, p_index);
 		uniform_set = _create_base_uniform_set(p_to_render_target, screen);
 		texture_storage->render_target_set_canvas_group_buffer_uniform_set(p_to_render_target, p_index, uniform_set);
 	}
@@ -781,6 +781,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 	struct CanvasGroupStackEntry {
 		Item *owner = nullptr;
 		int buffer_index = 0;
+		RID texture;
 		RenderTarget target;
 	};
 
@@ -817,27 +818,28 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		flush_render_items(parent_target);
 
 		const int buffer_index = canvas_group_stack.size();
+		const RendererRD::TextureStorage::CanvasGroupBufferRIDs buffer =
+				texture_storage->render_target_prepare_canvas_group_buffer_for_draw(p_to_render_target, buffer_index, Color(0, 0, 0, 0));
 
 		RenderTarget group_target;
 		group_target.render_target = p_to_render_target;
 		group_target.use_linear_colors = use_linear_colors;
-		group_target.framebuffer = texture_storage->render_target_get_rd_canvas_group_buffer_framebuffer(p_to_render_target, buffer_index);
+		group_target.framebuffer = buffer.framebuffer;
 		group_target.use_render_target_clear = false;
-		group_target.clear_requested = true;
-		group_target.clear_color = Color(0, 0, 0, 0);
 
 		if (canvas_group_stack.is_empty()) {
 			group_target.screen_texture = texture_storage->render_target_get_rd_texture(p_to_render_target);
 			group_target.base_uniform_set = get_main_color_uniform_set();
 		} else {
-			const int parent_buffer_index = canvas_group_stack[canvas_group_stack.size() - 1].buffer_index;
-			group_target.screen_texture = texture_storage->render_target_get_rd_canvas_group_buffer(p_to_render_target, parent_buffer_index);
-			group_target.base_uniform_set = _ensure_canvas_group_buffer_uniform_set(p_to_render_target, parent_buffer_index);
+			const CanvasGroupStackEntry &parent_entry = canvas_group_stack[canvas_group_stack.size() - 1];
+			group_target.screen_texture = parent_entry.texture;
+			group_target.base_uniform_set = _ensure_canvas_group_buffer_uniform_set(p_to_render_target, parent_entry.buffer_index, parent_entry.texture);
 		}
 
 		CanvasGroupStackEntry entry;
 		entry.owner = p_owner;
 		entry.buffer_index = buffer_index;
+		entry.texture = buffer.texture;
 		entry.target = group_target;
 		canvas_group_stack.push_back(entry);
 	};
@@ -848,6 +850,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		flush_render_items(entry.target);
 
 		const int buffer_index = entry.buffer_index;
+		const RID group_texture = entry.texture;
 		if (p_owner->canvas_group->blur_mipmaps) {
 			texture_storage->render_target_gen_canvas_group_buffer_mipmaps(p_to_render_target, buffer_index, p_owner->global_rect_cache);
 		}
@@ -856,7 +859,6 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 
 		RenderTarget composite_target = get_current_render_target();
 		composite_target.clear_requested = false;
-		RID group_texture = texture_storage->render_target_get_rd_canvas_group_buffer(p_to_render_target, buffer_index);
 
 		p_owner->canvas_group_texture = group_texture;
 		p_owner->use_canvas_group = true;

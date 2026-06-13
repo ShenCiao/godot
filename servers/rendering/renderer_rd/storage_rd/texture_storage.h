@@ -93,6 +93,11 @@ public:
 		_FORCE_INLINE_ bool is_null() const { return diffuse.is_null(); }
 	};
 
+	struct CanvasGroupBufferRIDs {
+		RID texture;
+		RID framebuffer;
+	};
+
 	typedef void (*InvalidationCallback)(bool p_deleted, void *p_userdata);
 
 private:
@@ -468,6 +473,7 @@ private:
 	void _render_target_allocate_sdf(RenderTarget *rt);
 	void _render_target_clear_sdf(RenderTarget *rt);
 	Rect2i _render_target_get_sdf_rect(const RenderTarget *rt) const;
+	bool _render_target_get_clamped_region(const RenderTarget *rt, const Rect2i &p_region, Rect2i &r_region) const;
 
 	struct RenderTargetSDF {
 		enum {
@@ -781,6 +787,7 @@ public:
 	void render_target_copy_to_back_buffer(RID p_render_target, const Rect2i &p_region, bool p_gen_mipmaps);
 	void render_target_clear_back_buffer(RID p_render_target, const Rect2i &p_region, const Color &p_color);
 	void render_target_gen_back_buffer_mipmaps(RID p_render_target, const Rect2i &p_region);
+	CanvasGroupBufferRIDs render_target_prepare_canvas_group_buffer_for_draw(RID p_render_target, int p_index, const Color &p_clear_color);
 	void render_target_gen_canvas_group_buffer_mipmaps(RID p_render_target, int p_index, const Rect2i &p_region);
 	RID render_target_get_back_buffer_uniform_set(RID p_render_target, RID p_base_shader);
 
