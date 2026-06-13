@@ -1881,6 +1881,7 @@ RendererCanvasRenderRD::RendererCanvasRenderRD() {
 		actions.renames["MODEL_MATRIX"] = "model_matrix";
 		actions.renames["CANVAS_MATRIX"] = "canvas_data.canvas_transform";
 		actions.renames["SCREEN_MATRIX"] = "canvas_data.screen_transform";
+		actions.renames["INSTANCE_TRANSFORM"] = "instance_transform";
 		actions.renames["TIME"] = "canvas_data.time";
 		actions.renames["PI"] = String::num(Math::PI);
 		actions.renames["TAU"] = String::num(Math::TAU);
@@ -1930,6 +1931,7 @@ RendererCanvasRenderRD::RendererCanvasRenderRD() {
 		actions.usage_defines["POINT_SIZE"] = "#define USE_POINT_SIZE\n";
 		actions.usage_defines["CUSTOM0"] = "#define CUSTOM0_USED\n";
 		actions.usage_defines["CUSTOM1"] = "#define CUSTOM1_USED\n";
+		actions.usage_defines["INSTANCE_TRANSFORM"] = "#define INSTANCE_TRANSFORM_USED\n";
 
 		actions.render_mode_defines["skip_vertex_transform"] = "#define SKIP_TRANSFORM_USED\n";
 		actions.render_mode_defines["unshaded"] = "#define MODE_UNSHADED\n";

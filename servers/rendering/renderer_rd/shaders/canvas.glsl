@@ -137,6 +137,9 @@ void main() {
 #endif // !USE_ATTRIBUTES
 
 	vec4 instance_custom = vec4(0.0);
+#ifdef INSTANCE_TRANSFORM_USED
+	mat4 instance_transform = mat4(1.0);
+#endif
 #if defined(CUSTOM0_USED)
 	vec4 custom0 = vec4(0.0);
 #endif
@@ -218,28 +221,39 @@ void main() {
 
 		vec4 pcolor;
 		vec2 new_vertex;
+		mat4 matrix;
 		{
 			uint boffset = offset + bone_attrib.x * stride;
-			new_vertex = (vec4(vertex, 0.0, 1.0) * mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))).xy * weight_attrib.x;
+			matrix = mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0)) * weight_attrib.x;
+			new_vertex = (vec4(vertex, 0.0, 1.0) * matrix).xy;
 			pcolor = transforms.data[boffset + 2] * weight_attrib.x;
 		}
 		if (weight_attrib.y > 0.001) {
 			uint boffset = offset + bone_attrib.y * stride;
-			new_vertex += (vec4(vertex, 0.0, 1.0) * mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))).xy * weight_attrib.y;
+			mat4 m = mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0)) * weight_attrib.y;
+			matrix += m;
+			new_vertex += (vec4(vertex, 0.0, 1.0) * m).xy;
 			pcolor += transforms.data[boffset + 2] * weight_attrib.y;
 		}
 		if (weight_attrib.z > 0.001) {
 			uint boffset = offset + bone_attrib.z * stride;
-			new_vertex += (vec4(vertex, 0.0, 1.0) * mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))).xy * weight_attrib.z;
+			mat4 m = mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0)) * weight_attrib.z;
+			matrix += m;
+			new_vertex += (vec4(vertex, 0.0, 1.0) * m).xy;
 			pcolor += transforms.data[boffset + 2] * weight_attrib.z;
 		}
 		if (weight_attrib.w > 0.001) {
 			uint boffset = offset + bone_attrib.w * stride;
-			new_vertex += (vec4(vertex, 0.0, 1.0) * mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))).xy * weight_attrib.w;
+			mat4 m = mat4(transforms.data[boffset + 0], transforms.data[boffset + 1], vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0)) * weight_attrib.w;
+			matrix += m;
+			new_vertex += (vec4(vertex, 0.0, 1.0) * m).xy;
 			pcolor += transforms.data[boffset + 2] * weight_attrib.w;
 		}
 
 		instance_custom = transforms.data[offset + 3];
+#ifdef INSTANCE_TRANSFORM_USED
+		instance_transform = transpose(matrix);
+#endif
 
 		vertex = new_vertex;
 		color *= pcolor;
@@ -261,7 +275,12 @@ void main() {
 		}
 
 		matrix = transpose(matrix);
+#ifdef INSTANCE_TRANSFORM_USED
+		instance_transform = matrix;
+#endif
+#ifndef INSTANCE_TRANSFORM_USED
 		model_matrix = model_matrix * matrix;
+#endif
 	}
 #endif // USE_ATTRIBUTES
 

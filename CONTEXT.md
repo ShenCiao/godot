@@ -33,6 +33,8 @@ CanvasGroup compositing source is not exposed through `hint_screen_texture`; tha
 
 CanvasGroup owner self-drawing is not supported in this custom build. A CanvasGroup is expected to let the engine-generated group rect draw its children texture; custom behavior should be expressed with a material/shader on the CanvasGroup, not with owner `_draw()` commands.
 
+INSTANCE_TRANSFORM is the per-instance transform matrix exposed to a CanvasItem vertex shader for the currently drawn MultiMesh instance. Avoid using "model matrix" for this concept: INSTANCE_TRANSFORM is only the per-instance part, separate from the node or canvas item's model transform.
+
 ## Arrangement 2D
 
 An arrangement face is a finite or infinite 2D region separated by user-authored polylines.
