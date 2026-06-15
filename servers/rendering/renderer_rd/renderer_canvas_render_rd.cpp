@@ -2637,6 +2637,11 @@ void RendererCanvasRenderRD::_record_item_commands(const Item *p_item, RenderTar
 						instance_data->flags |= INSTANCE_FLAGS_CLIP_RECT_UV;
 					}
 
+					if (rect_flags & CANVAS_RECT_IS_GROUP) {
+						Transform2D canvas_transform_inverse = p_base_transform * p_item->final_transform.affine_inverse();
+						_update_transform_2d_to_mat2x3(canvas_transform_inverse, instance_data->world);
+					}
+
 				} else {
 					dst_rect = Rect2(rect->rect.position, rect->rect.size);
 

@@ -319,7 +319,7 @@ void RendererCanvasCull::_attach_canvas_item_for_draw(RendererCanvasCull::Item *
 				RendererCanvasRender::Item::CommandRect *crect = ci->alloc_command<RendererCanvasRender::Item::CommandRect>();
 
 				crect->flags = RendererCanvasRender::CANVAS_RECT_IS_GROUP; // so we can recognize it later
-				crect->rect = p_transform.affine_inverse().xform(rect_accum);
+				crect->rect = rect_accum;
 				crect->modulate = Color(1, 1, 1, 1);
 
 				//the global rect is used to do the copying, so update it
