@@ -123,6 +123,7 @@ private:
 	static Dictionary make_triangle_result(PackedVector2Array p_vertices = {}, PackedInt32Array p_indices = {});
 
 	// CGAL construction functors.
+	// Point-range construction requires at least two consecutive distinct points.
 	inline static const CGAL::Geom_traits::Construct_curve_2 curve_constructor =
 			CGAL::Geom_traits{}.construct_curve_2_object();
 	inline static const CGAL::Geom_traits::Make_x_monotone_2 x_monotone_maker =
