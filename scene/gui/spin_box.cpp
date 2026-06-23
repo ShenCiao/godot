@@ -87,7 +87,11 @@ Size2 SpinBox::get_minimum_size() const {
 
 void SpinBox::_update_text(bool p_only_update_if_value_changed) {
 	double step = get_step();
-	String value = String::num(get_value(), Math::range_step_decimals(step));
+	const int decimals = max_display_decimals >= 0 ? max_display_decimals : Math::range_step_decimals(step);
+	String value = String::num(get_value(), decimals);
+	if (max_display_decimals >= 0) {
+		value = value.trim_suffix(".0");
+	}
 	if (is_localizing_numeral_system()) {
 		value = TranslationServer::get_singleton()->format_number(value, _get_locale());
 	}
@@ -628,6 +632,21 @@ bool SpinBox::is_custom_arrow_rounding() const {
 	return custom_arrow_round;
 }
 
+void SpinBox::set_max_display_decimals(int p_decimals) {
+	ERR_FAIL_COND(p_decimals < -1);
+
+	if (max_display_decimals == p_decimals) {
+		return;
+	}
+
+	max_display_decimals = p_decimals;
+	_update_text();
+}
+
+int SpinBox::get_max_display_decimals() const {
+	return max_display_decimals;
+}
+
 void SpinBox::_value_changed(double p_value) {
 	_update_buttons_state_for_current_value();
 }
@@ -662,6 +681,8 @@ void SpinBox::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_custom_arrow_step"), &SpinBox::get_custom_arrow_step);
 	ClassDB::bind_method(D_METHOD("set_custom_arrow_round", "round"), &SpinBox::set_custom_arrow_round);
 	ClassDB::bind_method(D_METHOD("is_custom_arrow_rounding"), &SpinBox::is_custom_arrow_rounding);
+	ClassDB::bind_method(D_METHOD("set_max_display_decimals", "decimals"), &SpinBox::set_max_display_decimals);
+	ClassDB::bind_method(D_METHOD("get_max_display_decimals"), &SpinBox::get_max_display_decimals);
 	ClassDB::bind_method(D_METHOD("is_editable"), &SpinBox::is_editable);
 	ClassDB::bind_method(D_METHOD("set_update_on_text_changed", "enabled"), &SpinBox::set_update_on_text_changed);
 	ClassDB::bind_method(D_METHOD("get_update_on_text_changed"), &SpinBox::get_update_on_text_changed);
@@ -677,6 +698,7 @@ void SpinBox::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "suffix"), "set_suffix", "get_suffix");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "custom_arrow_step", PROPERTY_HINT_RANGE, "0,10000,0.0001,or_greater"), "set_custom_arrow_step", "get_custom_arrow_step");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "custom_arrow_round"), "set_custom_arrow_round", "is_custom_arrow_rounding");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_display_decimals", PROPERTY_HINT_RANGE, "-1,32,1"), "set_max_display_decimals", "get_max_display_decimals");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "select_all_on_focus"), "set_select_all_on_focus", "is_select_all_on_focus");
 
 	BIND_THEME_ITEM(Theme::DATA_TYPE_CONSTANT, SpinBox, buttons_vertical_separation);

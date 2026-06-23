@@ -59,6 +59,10 @@
 		<member name="editable" type="bool" setter="set_editable" getter="is_editable" default="true" keywords="readonly, disabled, enabled">
 			If [code]true[/code], the [SpinBox] will be editable. Otherwise, it will be read only.
 		</member>
+		<member name="max_display_decimals" type="int" setter="set_max_display_decimals" getter="get_max_display_decimals" default="3">
+			The maximum number of decimal places to display. If [code]-1[/code], the displayed decimal places are determined from [member Range.step].
+			[b]Note:[/b] This only affects the displayed text. [member Range.value] is not rounded by this property.
+		</member>
 		<member name="prefix" type="String" setter="set_prefix" getter="get_prefix" default="&quot;&quot;">
 			Adds the specified prefix string before the numerical value of the [SpinBox].
 		</member>

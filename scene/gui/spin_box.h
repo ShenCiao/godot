@@ -78,6 +78,7 @@ class SpinBox : public Range {
 	String last_text_value;
 	double custom_arrow_step = 0.0;
 	bool custom_arrow_round = false;
+	int max_display_decimals = 3;
 
 	void _line_edit_input(const Ref<InputEvent> &p_event);
 
@@ -184,6 +185,9 @@ public:
 
 	void set_custom_arrow_round(bool p_round);
 	bool is_custom_arrow_rounding() const;
+
+	void set_max_display_decimals(int p_decimals);
+	int get_max_display_decimals() const;
 
 	SpinBox();
 };
