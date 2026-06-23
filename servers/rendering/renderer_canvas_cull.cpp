@@ -50,6 +50,15 @@ static bool _uses_transparent_canvas_group(const RendererCanvasCull::Item *p_ite
 	return p_item->canvas_group != nullptr && p_item->canvas_group->mode == RS::CANVAS_GROUP_MODE_TRANSPARENT && (p_item->canvas_group->fit_empty || p_item->commands != nullptr);
 }
 
+static bool _has_only_generated_canvas_group_command(const RendererCanvasRender::Item *p_item) {
+	if (p_item->commands == nullptr || p_item->commands->next != nullptr || p_item->commands->type != RendererCanvasRender::Item::Command::TYPE_RECT) {
+		return false;
+	}
+
+	const RendererCanvasRender::Item::CommandRect *rect = static_cast<const RendererCanvasRender::Item::CommandRect *>(p_item->commands);
+	return bool(rect->flags & RendererCanvasRender::CANVAS_RECT_IS_GROUP);
+}
+
 static void _append_canvas_item_span(RendererCanvasRender::Item *p_first, RendererCanvasRender::Item *p_last, int p_z, RendererCanvasRender::Item **r_z_list, RendererCanvasRender::Item **r_z_last_list, LocalVector<int> *r_touched_z_indices = nullptr) {
 	if (p_first == nullptr) {
 		return;
@@ -304,7 +313,7 @@ void RendererCanvasCull::_attach_canvas_item_for_draw(RendererCanvasCull::Item *
 
 			// We have two choices now, if user has drawn something, we must assume users wants to draw the "mask", so compute the size based on this.
 			// If nothing has been drawn, we just take it over and draw it ourselves.
-			if (ci->canvas_group->fit_empty && (ci->commands == nullptr || (ci->commands->next == nullptr && ci->commands->type == RendererCanvasCull::Item::Command::TYPE_RECT && (static_cast<RendererCanvasCull::Item::CommandRect *>(ci->commands)->flags & RendererCanvasRender::CANVAS_RECT_IS_GROUP)))) {
+			if (ci->canvas_group->fit_empty && (ci->commands == nullptr || _has_only_generated_canvas_group_command(ci))) {
 				// No commands, or sole command is the one used to draw, so we (re)create the draw command.
 				ci->clear();
 
@@ -340,6 +349,10 @@ void RendererCanvasCull::_attach_canvas_item_for_draw(RendererCanvasCull::Item *
 			if (ci->canvas_group->mode == RS::CANVAS_GROUP_MODE_TRANSPARENT) {
 				r_canvas_group_from->canvas_group_owners.push_back(ci);
 			}
+		} else if (_has_only_generated_canvas_group_command(ci)) {
+			// The generated CanvasGroup draw rect from a previous frame must not be
+			// rendered as an ordinary untextured rect when the group has no contents.
+			ci->clear();
 		}
 	}
 
