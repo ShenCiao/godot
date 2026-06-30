@@ -266,14 +266,22 @@ Dictionary Arrangement2D::repair_and_triangulate(TypedArray<PackedVector2Array> 
 }
 
 PackedVector2Array Arrangement2D::remove_consecutive_overlapping_points(PackedVector2Array p_polyline) {
-	auto end_it = std::unique(p_polyline.begin(), p_polyline.end());
-	size_t size = 0;
-	auto it = p_polyline.begin();
-	while (it != end_it) {
-		size++;
-		++it;
+	// Godot's Vector iterators don't model std::iterator_traits, which recent MSVC STL
+	// requires under C++17, so std::unique fails to compile. Deduplicate consecutive
+	// points manually instead.
+	const int point_count = p_polyline.size();
+	if (point_count < 2) {
+		return p_polyline;
 	}
-	p_polyline.resize(size);
+
+	int write = 1;
+	for (int read = 1; read < point_count; read++) {
+		if (p_polyline[read] != p_polyline[write - 1]) {
+			p_polyline.write[write] = p_polyline[read];
+			write++;
+		}
+	}
+	p_polyline.resize(write);
 	return p_polyline;
 }
 
