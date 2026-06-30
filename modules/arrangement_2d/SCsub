@@ -44,12 +44,20 @@ for key in ["CPPDEFINES", "CCFLAGS", "CXXFLAGS"]:
     if key in conan_flags:
         env_arrangement_2d.Append(**{key: conan_flags[key]})
 
+# CGAL's exact kernel relies on exceptions as control flow (interval arithmetic throws
+# Uncertain_conversion_exception and falls back to exact computation), so they can't be
+# disabled. Re-enable exceptions for this module only; Godot builds with them off globally.
 if env.msvc:
     env_arrangement_2d.Append(CCFLAGS=["/EHsc", "/external:W0"])
     for include_dir in conan_flags.get("CPPPATH", []):
         env_arrangement_2d.Append(CCFLAGS=[f"/external:I{include_dir}"])
-elif "CPPPATH" in conan_flags:
-    env_arrangement_2d.Append(CPPPATH=conan_flags["CPPPATH"])
+else:
+    # GCC/Clang: a trailing -fexceptions overrides the inherited -fno-exceptions.
+    env_arrangement_2d.Append(CXXFLAGS=["-fexceptions"])
+    # Treat CGAL headers as system headers (-isystem) so their warnings (-Wshadow etc.)
+    # are silenced, mirroring the MSVC /external approach above.
+    for include_dir in conan_flags.get("CPPPATH", []):
+        env_arrangement_2d.Append(CCFLAGS=["-isystem", include_dir])
 
 if "LIBPATH" in conan_flags:
     env.Append(LIBPATH=conan_flags["LIBPATH"])
