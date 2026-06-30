@@ -456,6 +456,83 @@ Dictionary Arrangement2D::make_curve_endpoint_info(CurveConstHandle p_curve) {
 	return result;
 }
 
+Dictionary Arrangement2D::make_curve_intersection_result(int64_t p_source_id, float p_query_t, float p_source_t, Vector2 p_position) {
+	Dictionary result{};
+	result["source_id"] = p_source_id;
+	result["query_t"] = p_query_t;
+	result["source_t"] = p_source_t;
+	result["position"] = p_position;
+	return result;
+}
+
+TypedArray<Dictionary> Arrangement2D::polyline_query_curve_intersections(PackedVector2Array p_polyline) {
+	TypedArray<Dictionary> result{};
+	if (p_polyline.size() < 2) {
+		return result;
+	}
+
+	CGAL::Segment_traits traits;
+	CGAL::Segment_traits::Intersect_2 intersect = traits.intersect_2_object();
+	using IntersectionPoint = std::pair<CGAL::Point, CGAL::Segment_traits::Multiplicity>;
+	using IntersectionResult = std::variant<IntersectionPoint, CGAL::Segment_traits::X_monotone_curve_2>;
+
+	// Walk the ORIGINAL query polyline by its own index so query_t matches the caller's
+	// SampledPolyline.Sample(t) semantics (segment index + in-segment fraction). We deliberately do
+	// NOT pass through remove_consecutive_overlapping_points here, which would renumber segments.
+	for (const SourceCurveHit &hit : collect_polyline_query_source_hits(p_polyline)) {
+		// Each halfedge carries one x-monotone (here, single-segment) sub-curve of the source.
+		const CGAL::X_monotone_curve &edge_curve = hit.halfedge->curve();
+		auto edge_begin = edge_curve.points_begin();
+		auto edge_end = edge_curve.points_end();
+		if (edge_begin == edge_end || std::next(edge_begin) == edge_end) {
+			continue;
+		}
+
+		for (int seg = 0; seg + 1 < p_polyline.size(); ++seg) {
+			CGAL::Point q_from(p_polyline[seg].x, p_polyline[seg].y);
+			CGAL::Point q_to(p_polyline[seg + 1].x, p_polyline[seg + 1].y);
+			if (q_from == q_to) {
+				continue;
+			}
+			CGAL::Segment_traits::X_monotone_curve_2 q_seg(q_from, q_to);
+
+			// Intersect this query segment against every sub-segment of the halfedge curve.
+			auto e_prev = edge_begin;
+			for (auto e_next = std::next(e_prev); e_next != edge_end; ++e_next, ++e_prev) {
+				if (*e_prev == *e_next) {
+					continue;
+				}
+				CGAL::Segment_traits::X_monotone_curve_2 e_seg(*e_prev, *e_next);
+
+				std::vector<IntersectionResult> intersections;
+				intersect(q_seg, e_seg, std::back_inserter(intersections));
+				for (const IntersectionResult &intersection : intersections) {
+					// A crossing yields a point; a parallel touch yields an overlap segment whose
+					// two endpoints are each reported (per design: overlap -> two intersections).
+					std::vector<CGAL::Point> hit_points;
+					if (const IntersectionPoint *point = std::get_if<IntersectionPoint>(&intersection)) {
+						hit_points.push_back(point->first);
+					} else if (const CGAL::Segment_traits::X_monotone_curve_2 *overlap =
+									   std::get_if<CGAL::Segment_traits::X_monotone_curve_2>(&intersection)) {
+						hit_points.push_back(overlap->source());
+						hit_points.push_back(overlap->target());
+					}
+
+					for (const CGAL::Point &p : hit_points) {
+						float query_t = static_cast<float>(seg + segment_fraction(q_from, q_to, p));
+						// Map onto the SOURCE curve's own polyline parameterization.
+						std::vector<float> source_ts = point_to_poly_ts(*hit.source_curve, p);
+						float source_t = source_ts.empty() ? -1.0f : source_ts.front();
+						result.push_back(make_curve_intersection_result(
+								hit.source_id, query_t, source_t, point_to_vector2(p)));
+					}
+				}
+			}
+		}
+	}
+	return result;
+}
+
 TypedArray<Dictionary> Arrangement2D::polyline_query_edges(PackedVector2Array p_polyline) {
 	TypedArray<Dictionary> result{};
 	std::map<const CGAL::Curve *, std::vector<float>> stop_ts_cache;

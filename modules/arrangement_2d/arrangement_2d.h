@@ -49,6 +49,7 @@ public:
 	TypedArray<RID> polyline_query_faces(PackedVector2Array p_polyline); // Returns face RIDs.
 	PackedInt64Array polyline_query_curves(PackedVector2Array p_polyline);
 	TypedArray<Dictionary> polyline_query_edges(PackedVector2Array p_polyline);
+	TypedArray<Dictionary> polyline_query_curve_intersections(PackedVector2Array p_polyline);
 	Vector2 get_curve_endpoint_junction_lengths(int64_t p_curve_id);
 	Dictionary get_curve_endpoint_info(int64_t p_curve_id);
 	TypedArray<RID> get_all_faces();
@@ -83,6 +84,7 @@ private:
 	// Edge query implementation.
 	std::vector<SourceCurveHit> collect_polyline_query_source_hits(PackedVector2Array p_polyline);
 	Dictionary make_edge_query_result(int64_t p_source_id, float p_from_t, float p_to_t);
+	Dictionary make_curve_intersection_result(int64_t p_source_id, float p_query_t, float p_source_t, Vector2 p_position);
 	Vector2 curve_endpoint_junction_lengths(CGAL::Arrangement::Curve_const_handle p_curve);
 	Dictionary make_curve_endpoint_info(CGAL::Arrangement::Curve_const_handle p_curve);
 	double curve_endpoint_junction_length(CGAL::Arrangement::Curve_const_handle p_curve, const CGAL::Point &p_endpoint, const CGAL::Point &p_next_source_point);

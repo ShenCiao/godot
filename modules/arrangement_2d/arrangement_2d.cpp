@@ -25,6 +25,7 @@ void Arrangement2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("polyline_query_faces", "polyline"), &Arrangement2D::polyline_query_faces);
 	ClassDB::bind_method(D_METHOD("polyline_query_curves", "polyline"), &Arrangement2D::polyline_query_curves);
 	ClassDB::bind_method(D_METHOD("polyline_query_edges", "polyline"), &Arrangement2D::polyline_query_edges);
+	ClassDB::bind_method(D_METHOD("polyline_query_curve_intersections", "polyline"), &Arrangement2D::polyline_query_curve_intersections);
 	ClassDB::bind_method(D_METHOD("get_curve_endpoint_junction_lengths", "curve_id"), &Arrangement2D::get_curve_endpoint_junction_lengths);
 	ClassDB::bind_method(D_METHOD("get_curve_endpoint_info", "curve_id"), &Arrangement2D::get_curve_endpoint_info);
 	ClassDB::bind_method(D_METHOD("points_query_faces", "points"), &Arrangement2D::points_query_faces);
