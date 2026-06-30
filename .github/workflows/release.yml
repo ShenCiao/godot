@@ -22,6 +22,7 @@ env:
   PYTHONIOENCODING: utf8
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
+  CONAN_HOME: ${{ github.workspace }}/.conan2
 
 jobs:
   build-release:
@@ -113,6 +114,33 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         run: Expand-Archive -Force angle/angle.zip ${{ github.workspace }}/
+
+      - name: Restore Windows Conan cache
+        if: matrix.platform == 'windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CONAN_HOME }}
+          key: conan2-${{ runner.os }}-arrangement2d-msvc-x86_64-${{ hashFiles('modules/arrangement_2d/conan.lock') }}
+          restore-keys: |
+            conan2-${{ runner.os }}-arrangement2d-msvc-x86_64-
+
+      - name: Install Conan
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          python -m pip install "conan>=2,<3"
+          conan --version
+
+      - name: Install arrangement_2d Conan dependencies
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          conan profile detect --force
+          rm -rf modules/arrangement_2d/conan_installed
+          conan install modules/arrangement_2d \
+            --lockfile=modules/arrangement_2d/conan.lock \
+            --build=missing \
+            --output-folder=modules/arrangement_2d/conan_installed
 
       - name: Setup macOS Vulkan SDK
         if: matrix.platform == 'macos'

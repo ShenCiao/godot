@@ -14,8 +14,14 @@ conan_deps = os.path.join(module_dir, "conan_installed", "SConscript_conandeps")
 
 if not os.path.exists(conan_deps):
     print("Conan dependencies for arrangement_2d not found, installing...")
+    conan_command = ["conan", "install", "."]
+    conan_lock = os.path.join(module_dir, "conan.lock")
+    if os.path.exists(conan_lock):
+        conan_command.append(f"--lockfile={conan_lock}")
+    conan_command += ["--build=missing", "--output-folder=conan_installed"]
+
     try:
-        result = subprocess.run(["conan", "install", ".", "--build=missing", "--output-folder=conan_installed"], cwd=module_dir)
+        result = subprocess.run(conan_command, cwd=module_dir)
     except FileNotFoundError:
         print("ERROR: Conan is required to build the arrangement_2d module but was not found.", file=sys.stderr)
         Exit(255)
