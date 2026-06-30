@@ -1,0 +1,248 @@
+name: Custom Godot Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version_status:
+        description: "Optional GODOT_VERSION_STATUS override. Defaults to ciallo.g<short-sha>."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONIOENCODING: utf8
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-release:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            runner: windows-latest
+            platform: windows
+            godot-platform: windows
+            archive-platform: windows
+            scons-flags: >-
+              module_mono_enabled=yes
+              windows_subsystem=console
+              debug_symbols=no
+              accesskit=no
+              "angle_libs=${{ github.workspace }}/"
+
+          - name: Linux
+            runner: ubuntu-22.04
+            platform: linuxbsd
+            godot-platform: linuxbsd
+            archive-platform: linuxbsd
+            scons-flags: >-
+              module_mono_enabled=yes
+              debug_symbols=no
+              accesskit=no
+
+          - name: macOS
+            runner: macos-latest
+            platform: macos
+            godot-platform: macos
+            archive-platform: macos
+            scons-flags: >-
+              module_mono_enabled=yes
+              debug_symbols=no
+              accesskit=no
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Python and SCons
+        uses: ./.github/actions/godot-deps
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'linuxbsd'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libwayland-bin \
+            libx11-dev libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev \
+            libwayland-dev libgl1-mesa-dev libglu1-mesa-dev libasound2-dev \
+            libpulse-dev libudev-dev libxkbcommon-dev
+
+      - name: Download Windows Direct3D 12 SDK components
+        if: matrix.platform == 'windows'
+        id: d3d12-sdk
+        shell: bash
+        run: |
+          if python ./misc/scripts/install_d3d12_sdk_windows.py; then
+            echo "enabled=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Direct3D 12 SDK installation failed; building without D3D12 support."
+            echo "enabled=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download pre-built Windows ANGLE static libraries
+        if: matrix.platform == 'windows'
+        uses: dsaltares/fetch-gh-release-asset@1.1.2
+        with:
+          repo: godotengine/godot-angle-static
+          version: tags/chromium/6601.2
+          file: godot-angle-static-x86_64-msvc-release.zip
+          target: angle/angle.zip
+
+      - name: Extract pre-built Windows ANGLE static libraries
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: Expand-Archive -Force angle/angle.zip ${{ github.workspace }}/
+
+      - name: Setup macOS Vulkan SDK
+        if: matrix.platform == 'macos'
+        id: vulkan-sdk
+        shell: bash
+        run: |
+          if sh misc/scripts/install_vulkan_sdk_macos.sh; then
+            echo "enabled=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::macOS Vulkan SDK installation failed; building without Vulkan support."
+            echo "enabled=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute version status
+        id: ver
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.version_status }}" ]; then
+            STATUS="${{ inputs.version_status }}"
+          else
+            STATUS="ciallo.g$(git rev-parse --short=9 HEAD)"
+          fi
+          echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
+          echo "GODOT_VERSION_STATUS=${STATUS}"
+
+      - name: Build editor
+        if: matrix.platform != 'macos'
+        shell: bash
+        env:
+          BUILD_NAME: ciallo
+          GODOT_VERSION_STATUS: ${{ steps.ver.outputs.status }}
+        run: |
+          EXTRA_FLAGS=""
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            EXTRA_FLAGS="d3d12=${{ steps.d3d12-sdk.outputs.enabled }}"
+          fi
+          scons platform=${{ matrix.platform }} target=editor ${{ matrix.scons-flags }} ${EXTRA_FLAGS}
+          ls -l bin/
+
+      - name: Build macOS editor x86_64
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          BUILD_NAME: ciallo
+          GODOT_VERSION_STATUS: ${{ steps.ver.outputs.status }}
+        run: |
+          scons platform=macos target=editor arch=x86_64 ${{ matrix.scons-flags }} vulkan=${{ steps.vulkan-sdk.outputs.enabled }}
+
+      - name: Build macOS editor arm64
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          BUILD_NAME: ciallo
+          GODOT_VERSION_STATUS: ${{ steps.ver.outputs.status }}
+        run: |
+          scons platform=macos target=editor arch=arm64 ${{ matrix.scons-flags }} vulkan=${{ steps.vulkan-sdk.outputs.enabled }}
+
+      - name: Create macOS universal editor
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          lipo -create ./bin/godot.macos.editor.x86_64.mono ./bin/godot.macos.editor.arm64.mono -output ./bin/godot.macos.editor.universal.mono
+          rm -f ./bin/godot.macos.editor.x86_64 ./bin/godot.macos.editor.arm64
+          rm -f ./bin/godot.macos.editor.x86_64.mono ./bin/godot.macos.editor.arm64.mono
+          chmod +x ./bin/godot.macos.editor.universal.mono
+
+      - name: Locate .NET editor binary
+        id: editor
+        shell: bash
+        run: |
+          EDITOR_BIN="$(find ./bin -maxdepth 1 -type f -name 'godot.${{ matrix.godot-platform }}.editor*.mono*' \
+            ! -name '*.console.exe' ! -name '*.console' ! -name '*.pdb' ! -name '*.lib' ! -name '*.exp' \
+            | sort | head -n1)"
+          if [ -z "$EDITOR_BIN" ]; then
+            echo "Could not find .NET editor binary in bin/"; ls -l bin/; exit 1
+          fi
+          echo "path=${EDITOR_BIN}" >> "$GITHUB_OUTPUT"
+          echo "Editor binary: ${EDITOR_BIN}"
+
+      - name: Generate C# glue
+        shell: bash
+        run: |
+          "${{ steps.editor.outputs.path }}" --headless --generate-mono-glue modules/mono/glue
+
+      - name: Build .NET assemblies and bundled NuGet packages
+        shell: bash
+        env:
+          GODOT_VERSION_STATUS: ${{ steps.ver.outputs.status }}
+        run: |
+          mkdir -p ./bin/GodotSharp/Tools/nupkgs
+          python modules/mono/build_scripts/build_assemblies.py \
+            --godot-output-dir ./bin \
+            --godot-platform=${{ matrix.godot-platform }} \
+            --push-nupkgs-local ./bin/GodotSharp/Tools/nupkgs
+
+      - name: Verify bundled NuGet packages
+        shell: bash
+        run: |
+          VERSION="$(python -c 'import version; print(f"{version.major}.{version.minor}.{version.patch}")')-${{ steps.ver.outputs.status }}"
+          test -f "./bin/GodotSharp/Tools/nupkgs/Godot.NET.Sdk.${VERSION}.nupkg"
+          test -f "./bin/GodotSharp/Tools/nupkgs/Godot.SourceGenerators.${VERSION}.nupkg"
+          test -f "./bin/GodotSharp/Tools/nupkgs/GodotSharp.${VERSION}.nupkg"
+          test -f "./bin/GodotSharp/Tools/nupkgs/GodotSharpEditor.${VERSION}.nupkg"
+          ls -lh ./bin/GodotSharp/Tools/nupkgs/
+
+      - name: Package editor and bundled C# packages
+        id: package
+        shell: bash
+        run: |
+          rm -f bin/*.exp bin/*.lib bin/*.pdb 2>/dev/null || true
+          strip bin/godot.* 2>/dev/null || true
+          chmod +x bin/godot.* 2>/dev/null || true
+          ARCHIVE="godot-${{ matrix.archive-platform }}-${{ steps.ver.outputs.status }}.zip"
+          if command -v 7z >/dev/null 2>&1; then
+            7z a "$ARCHIVE" ./bin/* >/dev/null
+          else
+            (cd bin && zip -r "../$ARCHIVE" . >/dev/null)
+          fi
+          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+          ls -lh "$ARCHIVE"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-${{ matrix.archive-platform }}-${{ steps.ver.outputs.status }}
+          path: ${{ steps.package.outputs.archive }}
+
+      - name: Publish to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.archive }}
+          fail_on_unmatched_files: true

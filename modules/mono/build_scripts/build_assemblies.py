@@ -280,12 +280,17 @@ def generate_sdk_package_versions():
     if version_status != "stable":  # Pre-release
         # If version was overridden to be e.g. "beta3", we insert a dot between
         # "beta" and "3" to follow SemVer 2.0.
+        # If the status already contains a dot (e.g. a custom build status like
+        # "ciallo.gabc1234" where the trailing segment is a git short hash), it is
+        # assumed to already be a valid SemVer pre-release identifier and is left
+        # as-is. Splitting it would mangle hashes that happen to end in digits.
         import re
 
-        match = re.search(r"[\d]+$", version_status)
-        if match:
-            pos = match.start()
-            version_status = version_status[:pos] + "." + version_status[pos:]
+        if "." not in version_status:
+            match = re.search(r"[\d]+$", version_status)
+            if match:
+                pos = match.start()
+                version_status = version_status[:pos] + "." + version_status[pos:]
         version_str += "-" + version_status
 
     import version
