@@ -18,7 +18,14 @@ if not os.path.exists(conan_deps):
     conan_lock = os.path.join(module_dir, "conan.lock")
     if os.path.exists(conan_lock):
         conan_command.append(f"--lockfile={conan_lock}")
-    conan_command += ["--build=missing", "--output-folder=conan_installed"]
+    conan_command += [
+        "--build=missing",
+        "--output-folder=conan_installed",
+        "-s:h",
+        "compiler.cppstd=17",
+        "-s:b",
+        "compiler.cppstd=17",
+    ]
 
     try:
         result = subprocess.run(conan_command, cwd=module_dir)
@@ -50,19 +57,30 @@ if "LIBPATH" in conan_flags:
 if "LINKFLAGS" in conan_flags:
     env.Append(LINKFLAGS=conan_flags["LINKFLAGS"])
 
-link_flags = []
-for lib in conan_flags.get("LIBS", []):
-    lib_filename = lib if lib.lower().endswith(".lib") else lib + ".lib"
-    lib_path = None
-    for lib_dir in conan_flags.get("LIBPATH", []):
-        candidate = os.path.join(lib_dir, lib_filename)
-        if os.path.exists(candidate):
-            lib_path = candidate
-            break
-    link_flags.append(lib_path if lib_path else lib_filename)
+if "FRAMEWORKPATH" in conan_flags:
+    for framework_dir in conan_flags["FRAMEWORKPATH"]:
+        env.Append(LINKFLAGS=["-F" + framework_dir])
 
-if link_flags:
-    env.Append(LINKFLAGS=link_flags)
+if "FRAMEWORKS" in conan_flags:
+    for framework in conan_flags["FRAMEWORKS"]:
+        env.Append(LINKFLAGS=["-framework", framework])
+
+if env.msvc:
+    link_flags = []
+    for lib in conan_flags.get("LIBS", []):
+        lib_filename = lib if lib.lower().endswith(".lib") else lib + ".lib"
+        lib_path = None
+        for lib_dir in conan_flags.get("LIBPATH", []):
+            candidate = os.path.join(lib_dir, lib_filename)
+            if os.path.exists(candidate):
+                lib_path = candidate
+                break
+        link_flags.append(lib_path if lib_path else lib_filename)
+
+    if link_flags:
+        env.Append(LINKFLAGS=link_flags)
+elif "LIBS" in conan_flags:
+    env.Append(LIBS=conan_flags["LIBS"])
 
 module_obj = []
 env_arrangement_2d.add_source_files(module_obj, "*.cpp")
