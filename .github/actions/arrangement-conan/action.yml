@@ -1,0 +1,43 @@
+name: Setup arrangement_2d Conan dependencies
+description: Restore the Conan cache and install the CGAL dependencies for the arrangement_2d module.
+
+inputs:
+  arch:
+    description: Target architecture passed to Conan (e.g. x86_64, armv8).
+    required: true
+  conan-home:
+    description: >-
+      CONAN_HOME path to cache. Must match the workflow's CONAN_HOME env var.
+      Defaults to <workspace>/.conan2 because workflow-level env is not exposed
+      to the env context inside composite actions.
+    default: ${{ github.workspace }}/.conan2
+
+runs:
+  using: composite
+  steps:
+    - name: Restore Conan cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ inputs.conan-home }}
+        key: conan2-${{ runner.os }}-cgal-${{ inputs.arch }}-cppstd17-${{ hashFiles('modules/arrangement_2d/conan.lock') }}
+        restore-keys: |
+          conan2-${{ runner.os }}-cgal-${{ inputs.arch }}-cppstd17-
+
+    - name: Install Conan
+      shell: bash
+      run: |
+        python -m pip install "conan>=2,<3"
+        conan --version
+
+    - name: Install CGAL Conan dependencies
+      shell: bash
+      run: |
+        conan profile detect --force
+        rm -rf modules/arrangement_2d/conan_installed
+        conan install modules/arrangement_2d \
+          --lockfile=modules/arrangement_2d/conan.lock \
+          --build=missing \
+          --output-folder=modules/arrangement_2d/conan_installed \
+          -s:h compiler.cppstd=17 \
+          -s:b compiler.cppstd=17 \
+          -s:h arch=${{ inputs.arch }}

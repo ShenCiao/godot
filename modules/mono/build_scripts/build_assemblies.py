@@ -409,7 +409,7 @@ def main():
     parser.add_argument(
         "--no-deprecated",
         action="store_true",
-        default=False,
+        default=True,
         help="Build GodotSharp without using deprecated features. This is required, if the engine was built with 'deprecated=no'.",
     )
     parser.add_argument("--werror", action="store_true", default=False, help="Treat compiler warnings as errors.")

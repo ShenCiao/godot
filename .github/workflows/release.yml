@@ -25,8 +25,30 @@ env:
   CONAN_HOME: ${{ github.workspace }}/.conan2
 
 jobs:
+  version:
+    name: Compute version status
+    runs-on: ubuntu-22.04
+    outputs:
+      status: ${{ steps.ver.outputs.status }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute version status
+        id: ver
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.version_status }}" ]; then
+            STATUS="${{ inputs.version_status }}"
+          else
+            STATUS="ciallo.g$(git rev-parse --short=9 HEAD)"
+          fi
+          echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
+          echo "Using version status '${STATUS}'."
+
   windows-build:
     name: Windows Editor
+    needs: version
     runs-on: windows-latest
     timeout-minutes: 180
     steps:
@@ -66,55 +88,22 @@ jobs:
         shell: pwsh
         run: Expand-Archive -Force angle/angle.zip ${{ github.workspace }}/
 
-      - name: Restore Conan cache
-        uses: actions/cache@v4
+      - name: Setup arrangement_2d Conan dependencies
+        uses: ./.github/actions/arrangement-conan
         with:
-          path: ${{ env.CONAN_HOME }}
-          key: conan2-${{ runner.os }}-cgal-x86_64-cppstd17-${{ hashFiles('modules/arrangement_2d/conan.lock') }}
-          restore-keys: |
-            conan2-${{ runner.os }}-cgal-x86_64-cppstd17-
-
-      - name: Install Conan
-        shell: bash
-        run: |
-          python -m pip install "conan>=2,<3"
-          conan --version
-
-      - name: Install CGAL Conan Dependencies
-        shell: bash
-        run: |
-          conan profile detect --force
-          rm -rf modules/arrangement_2d/conan_installed
-          conan install modules/arrangement_2d \
-            --lockfile=modules/arrangement_2d/conan.lock \
-            --build=missing \
-            --output-folder=modules/arrangement_2d/conan_installed \
-            -s:h compiler.cppstd=17 \
-            -s:b compiler.cppstd=17 \
-            -s:h arch=x86_64
-
-      - name: Compute version status
-        id: ver
-        shell: bash
-        run: |
-          if [ -n "${{ inputs.version_status }}" ]; then
-            STATUS="${{ inputs.version_status }}"
-          else
-            STATUS="ciallo.g$(git rev-parse --short=9 HEAD)"
-          fi
-          echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
-          echo "GODOT_VERSION_STATUS=${STATUS}"
+          arch: x86_64
 
       - name: Build editor
         shell: bash
         env:
           BUILD_NAME: ciallo
-          GODOT_VERSION_STATUS: ${{ steps.ver.outputs.status }}
+          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
         run: |
           scons platform=windows target=editor \
             module_mono_enabled=yes \
             windows_subsystem=console \
             debug_symbols=no \
+            deprecated=no \
             accesskit=no \
             "angle_libs=${{ github.workspace }}/" \
             d3d12=${{ steps.d3d12-sdk.outputs.enabled }}
@@ -141,18 +130,19 @@ jobs:
       - name: Build .NET assemblies and bundled NuGet packages
         shell: bash
         env:
-          GODOT_VERSION_STATUS: ${{ steps.ver.outputs.status }}
+          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
         run: |
           mkdir -p ./bin/GodotSharp/Tools/nupkgs
           python modules/mono/build_scripts/build_assemblies.py \
             --godot-output-dir ./bin \
             --godot-platform=windows \
-            --push-nupkgs-local ./bin/GodotSharp/Tools/nupkgs
+            --push-nupkgs-local ./bin/GodotSharp/Tools/nupkgs \
+            --no-deprecated
 
       - name: Verify bundled NuGet packages
         shell: bash
         run: |
-          VERSION="$(python -c 'import version; print(f"{version.major}.{version.minor}.{version.patch}")')-${{ steps.ver.outputs.status }}"
+          VERSION="$(python -c 'import version; print(f"{version.major}.{version.minor}.{version.patch}")')-${{ needs.version.outputs.status }}"
           test -f "./bin/GodotSharp/Tools/nupkgs/Godot.NET.Sdk.${VERSION}.nupkg"
           test -f "./bin/GodotSharp/Tools/nupkgs/Godot.SourceGenerators.${VERSION}.nupkg"
           test -f "./bin/GodotSharp/Tools/nupkgs/GodotSharp.${VERSION}.nupkg"
@@ -164,7 +154,7 @@ jobs:
         shell: bash
         run: |
           rm -f bin/*.exp bin/*.lib bin/*.pdb 2>/dev/null || true
-          ARCHIVE="godot-windows-x86_64-${{ steps.ver.outputs.status }}.zip"
+          ARCHIVE="godot-windows-x86_64-${{ needs.version.outputs.status }}.zip"
           7z a "$ARCHIVE" ./bin/* >/dev/null
           echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
           ls -lh "$ARCHIVE"
@@ -172,7 +162,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: godot-windows-x86_64-${{ steps.ver.outputs.status }}
+          name: godot-windows-x86_64-${{ needs.version.outputs.status }}
           path: ${{ steps.package.outputs.archive }}
 
       - name: Publish to GitHub Release
@@ -184,6 +174,7 @@ jobs:
 
   linux-build:
     name: Linux Editor
+    needs: version
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     steps:
@@ -209,54 +200,21 @@ jobs:
             libwayland-dev libgl1-mesa-dev libglu1-mesa-dev libasound2-dev \
             libpulse-dev libudev-dev libxkbcommon-dev
 
-      - name: Restore Conan cache
-        uses: actions/cache@v4
+      - name: Setup arrangement_2d Conan dependencies
+        uses: ./.github/actions/arrangement-conan
         with:
-          path: ${{ env.CONAN_HOME }}
-          key: conan2-${{ runner.os }}-cgal-x86_64-cppstd17-${{ hashFiles('modules/arrangement_2d/conan.lock') }}
-          restore-keys: |
-            conan2-${{ runner.os }}-cgal-x86_64-cppstd17-
-
-      - name: Install Conan
-        shell: bash
-        run: |
-          python -m pip install "conan>=2,<3"
-          conan --version
-
-      - name: Install CGAL Conan Dependencies
-        shell: bash
-        run: |
-          conan profile detect --force
-          rm -rf modules/arrangement_2d/conan_installed
-          conan install modules/arrangement_2d \
-            --lockfile=modules/arrangement_2d/conan.lock \
-            --build=missing \
-            --output-folder=modules/arrangement_2d/conan_installed \
-            -s:h compiler.cppstd=17 \
-            -s:b compiler.cppstd=17 \
-            -s:h arch=x86_64
-
-      - name: Compute version status
-        id: ver
-        shell: bash
-        run: |
-          if [ -n "${{ inputs.version_status }}" ]; then
-            STATUS="${{ inputs.version_status }}"
-          else
-            STATUS="ciallo.g$(git rev-parse --short=9 HEAD)"
-          fi
-          echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
-          echo "GODOT_VERSION_STATUS=${STATUS}"
+          arch: x86_64
 
       - name: Build editor
         shell: bash
         env:
           BUILD_NAME: ciallo
-          GODOT_VERSION_STATUS: ${{ steps.ver.outputs.status }}
+          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
         run: |
           scons platform=linuxbsd target=editor \
             module_mono_enabled=yes \
             debug_symbols=no \
+            deprecated=no \
             accesskit=no
           ls -l bin/
 
@@ -281,18 +239,19 @@ jobs:
       - name: Build .NET assemblies and bundled NuGet packages
         shell: bash
         env:
-          GODOT_VERSION_STATUS: ${{ steps.ver.outputs.status }}
+          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
         run: |
           mkdir -p ./bin/GodotSharp/Tools/nupkgs
           python modules/mono/build_scripts/build_assemblies.py \
             --godot-output-dir ./bin \
             --godot-platform=linuxbsd \
-            --push-nupkgs-local ./bin/GodotSharp/Tools/nupkgs
+            --push-nupkgs-local ./bin/GodotSharp/Tools/nupkgs \
+            --no-deprecated
 
       - name: Verify bundled NuGet packages
         shell: bash
         run: |
-          VERSION="$(python -c 'import version; print(f"{version.major}.{version.minor}.{version.patch}")')-${{ steps.ver.outputs.status }}"
+          VERSION="$(python -c 'import version; print(f"{version.major}.{version.minor}.{version.patch}")')-${{ needs.version.outputs.status }}"
           test -f "./bin/GodotSharp/Tools/nupkgs/Godot.NET.Sdk.${VERSION}.nupkg"
           test -f "./bin/GodotSharp/Tools/nupkgs/Godot.SourceGenerators.${VERSION}.nupkg"
           test -f "./bin/GodotSharp/Tools/nupkgs/GodotSharp.${VERSION}.nupkg"
@@ -305,7 +264,7 @@ jobs:
         run: |
           strip bin/godot.* 2>/dev/null || true
           chmod +x bin/godot.* 2>/dev/null || true
-          ARCHIVE="godot-linuxbsd-x86_64-${{ steps.ver.outputs.status }}.zip"
+          ARCHIVE="godot-linuxbsd-x86_64-${{ needs.version.outputs.status }}.zip"
           (cd bin && zip -r "../$ARCHIVE" . >/dev/null)
           echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
           ls -lh "$ARCHIVE"
@@ -313,7 +272,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: godot-linuxbsd-x86_64-${{ steps.ver.outputs.status }}
+          name: godot-linuxbsd-x86_64-${{ needs.version.outputs.status }}
           path: ${{ steps.package.outputs.archive }}
 
       - name: Publish to GitHub Release
@@ -325,6 +284,7 @@ jobs:
 
   macos-build:
     name: macOS Editor
+    needs: version
     runs-on: macos-26
     timeout-minutes: 180
     steps:
@@ -344,32 +304,10 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Restore Conan cache
-        uses: actions/cache@v4
+      - name: Setup arrangement_2d Conan dependencies
+        uses: ./.github/actions/arrangement-conan
         with:
-          path: ${{ env.CONAN_HOME }}
-          key: conan2-${{ runner.os }}-cgal-armv8-cppstd17-${{ hashFiles('modules/arrangement_2d/conan.lock') }}
-          restore-keys: |
-            conan2-${{ runner.os }}-cgal-armv8-cppstd17-
-
-      - name: Install Conan
-        shell: bash
-        run: |
-          python -m pip install "conan>=2,<3"
-          conan --version
-
-      - name: Install CGAL Conan Dependencies
-        shell: bash
-        run: |
-          conan profile detect --force
-          rm -rf modules/arrangement_2d/conan_installed
-          conan install modules/arrangement_2d \
-            --lockfile=modules/arrangement_2d/conan.lock \
-            --build=missing \
-            --output-folder=modules/arrangement_2d/conan_installed \
-            -s:h compiler.cppstd=17 \
-            -s:b compiler.cppstd=17 \
-            -s:h arch=armv8
+          arch: armv8
 
       - name: Setup Vulkan SDK
         id: vulkan-sdk
@@ -382,27 +320,16 @@ jobs:
             echo "enabled=no" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Compute version status
-        id: ver
-        shell: bash
-        run: |
-          if [ -n "${{ inputs.version_status }}" ]; then
-            STATUS="${{ inputs.version_status }}"
-          else
-            STATUS="ciallo.g$(git rev-parse --short=9 HEAD)"
-          fi
-          echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
-          echo "GODOT_VERSION_STATUS=${STATUS}"
-
       - name: Build editor
         shell: bash
         env:
           BUILD_NAME: ciallo
-          GODOT_VERSION_STATUS: ${{ steps.ver.outputs.status }}
+          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
         run: |
           scons platform=macos target=editor arch=arm64 \
             module_mono_enabled=yes \
             debug_symbols=no \
+            deprecated=no \
             accesskit=no \
             vulkan=${{ steps.vulkan-sdk.outputs.enabled }}
           ls -l bin/
@@ -428,18 +355,19 @@ jobs:
       - name: Build .NET assemblies and bundled NuGet packages
         shell: bash
         env:
-          GODOT_VERSION_STATUS: ${{ steps.ver.outputs.status }}
+          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
         run: |
           mkdir -p ./bin/GodotSharp/Tools/nupkgs
           python modules/mono/build_scripts/build_assemblies.py \
             --godot-output-dir ./bin \
             --godot-platform=macos \
-            --push-nupkgs-local ./bin/GodotSharp/Tools/nupkgs
+            --push-nupkgs-local ./bin/GodotSharp/Tools/nupkgs \
+            --no-deprecated
 
       - name: Verify bundled NuGet packages
         shell: bash
         run: |
-          VERSION="$(python -c 'import version; print(f"{version.major}.{version.minor}.{version.patch}")')-${{ steps.ver.outputs.status }}"
+          VERSION="$(python -c 'import version; print(f"{version.major}.{version.minor}.{version.patch}")')-${{ needs.version.outputs.status }}"
           test -f "./bin/GodotSharp/Tools/nupkgs/Godot.NET.Sdk.${VERSION}.nupkg"
           test -f "./bin/GodotSharp/Tools/nupkgs/Godot.SourceGenerators.${VERSION}.nupkg"
           test -f "./bin/GodotSharp/Tools/nupkgs/GodotSharp.${VERSION}.nupkg"
@@ -452,7 +380,7 @@ jobs:
         run: |
           strip bin/godot.* 2>/dev/null || true
           chmod +x bin/godot.* 2>/dev/null || true
-          ARCHIVE="godot-macos-arm64-${{ steps.ver.outputs.status }}.zip"
+          ARCHIVE="godot-macos-arm64-${{ needs.version.outputs.status }}.zip"
           (cd bin && zip -r "../$ARCHIVE" . >/dev/null)
           echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
           ls -lh "$ARCHIVE"
@@ -460,7 +388,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: godot-macos-arm64-${{ steps.ver.outputs.status }}
+          name: godot-macos-arm64-${{ needs.version.outputs.status }}
           path: ${{ steps.package.outputs.archive }}
 
       - name: Publish to GitHub Release
