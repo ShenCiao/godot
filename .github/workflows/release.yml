@@ -23,6 +23,7 @@ env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   CONAN_HOME: ${{ github.workspace }}/.conan2
+  SCONS_CACHE: ${{ github.workspace }}/.scons_cache/
 
 jobs:
   version:
@@ -88,9 +89,10 @@ jobs:
           GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
         run: |
           scons platform=windows target=editor \
-            production=yes \
             windows_subsystem=console \
-            d3d12=${{ steps.d3d12-sdk.outputs.enabled }}
+            d3d12=${{ steps.d3d12-sdk.outputs.enabled }} \
+            "cache_path=${SCONS_CACHE}" \
+            redirect_build_objects=no
           ls -l bin/
 
       - name: Locate .NET editor binary
@@ -137,6 +139,7 @@ jobs:
         id: package
         shell: bash
         run: |
+          rm -rf bin/build_deps bin/obj
           rm -f bin/*.exp bin/*.lib bin/*.pdb 2>/dev/null || true
           ARCHIVE="godot-windows-x86_64-${{ needs.version.outputs.status }}.zip"
           7z a "$ARCHIVE" ./bin/* >/dev/null
@@ -196,7 +199,8 @@ jobs:
           GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
         run: |
           scons platform=linuxbsd target=editor \
-            production=yes
+            "cache_path=${SCONS_CACHE}" \
+            redirect_build_objects=no
           ls -l bin/
 
       - name: Locate .NET editor binary
@@ -243,6 +247,7 @@ jobs:
         id: package
         shell: bash
         run: |
+          rm -rf ./bin/build_deps ./bin/obj
           strip bin/godot.* 2>/dev/null || true
           chmod +x bin/godot.* 2>/dev/null || true
           ARCHIVE="godot-linuxbsd-x86_64-${{ needs.version.outputs.status }}.zip"
@@ -308,8 +313,9 @@ jobs:
           GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
         run: |
           scons platform=macos target=editor arch=arm64 \
-            production=yes \
-            vulkan=${{ steps.vulkan-sdk.outputs.enabled }}
+            vulkan=${{ steps.vulkan-sdk.outputs.enabled }} \
+            "cache_path=${SCONS_CACHE}" \
+            redirect_build_objects=no
           ls -l bin/
 
       - name: Locate .NET editor binary
@@ -356,6 +362,7 @@ jobs:
         id: package
         shell: bash
         run: |
+          rm -rf ./bin/build_deps ./bin/obj
           strip bin/godot.* 2>/dev/null || true
           chmod +x bin/godot.* 2>/dev/null || true
           ARCHIVE="godot-macos-arm64-${{ needs.version.outputs.status }}.zip"
