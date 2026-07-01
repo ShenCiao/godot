@@ -32,7 +32,7 @@ jobs:
       status: ${{ steps.ver.outputs.status }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Compute version status
         id: ver
@@ -53,7 +53,7 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -61,7 +61,7 @@ jobs:
         uses: ./.github/actions/godot-deps
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "8.0.x"
 
@@ -76,18 +76,6 @@ jobs:
             echo "enabled=no" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Download pre-built ANGLE static libraries
-        uses: dsaltares/fetch-gh-release-asset@1.1.2
-        with:
-          repo: godotengine/godot-angle-static
-          version: tags/chromium/6601.2
-          file: godot-angle-static-x86_64-msvc-release.zip
-          target: angle/angle.zip
-
-      - name: Extract pre-built ANGLE static libraries
-        shell: pwsh
-        run: Expand-Archive -Force angle/angle.zip ${{ github.workspace }}/
-
       - name: Setup arrangement_2d Conan dependencies
         uses: ./.github/actions/arrangement-conan
         with:
@@ -100,12 +88,13 @@ jobs:
           GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
         run: |
           scons platform=windows target=editor \
+            production=yes \
             module_mono_enabled=yes \
             windows_subsystem=console \
             debug_symbols=no \
             deprecated=no \
             accesskit=no \
-            "angle_libs=${{ github.workspace }}/" \
+            opengl3=no \
             d3d12=${{ steps.d3d12-sdk.outputs.enabled }}
           ls -l bin/
 
@@ -160,7 +149,7 @@ jobs:
           ls -lh "$ARCHIVE"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: godot-windows-x86_64-${{ needs.version.outputs.status }}
           path: ${{ steps.package.outputs.archive }}
@@ -179,7 +168,7 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -187,7 +176,7 @@ jobs:
         uses: ./.github/actions/godot-deps
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "8.0.x"
 
@@ -212,10 +201,12 @@ jobs:
           GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
         run: |
           scons platform=linuxbsd target=editor \
+            production=yes \
             module_mono_enabled=yes \
             debug_symbols=no \
             deprecated=no \
-            accesskit=no
+            accesskit=no \
+            opengl3=no
           ls -l bin/
 
       - name: Locate .NET editor binary
@@ -270,7 +261,7 @@ jobs:
           ls -lh "$ARCHIVE"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: godot-linuxbsd-x86_64-${{ needs.version.outputs.status }}
           path: ${{ steps.package.outputs.archive }}
@@ -289,7 +280,7 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -300,7 +291,7 @@ jobs:
         uses: ./.github/actions/godot-deps
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "8.0.x"
 
@@ -327,10 +318,12 @@ jobs:
           GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
         run: |
           scons platform=macos target=editor arch=arm64 \
+            production=yes \
             module_mono_enabled=yes \
             debug_symbols=no \
             deprecated=no \
             accesskit=no \
+            opengl3=no \
             vulkan=${{ steps.vulkan-sdk.outputs.enabled }}
           ls -l bin/
 
@@ -386,7 +379,7 @@ jobs:
           ls -lh "$ARCHIVE"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: godot-macos-arm64-${{ needs.version.outputs.status }}
           path: ${{ steps.package.outputs.archive }}

@@ -16,7 +16,7 @@ runs:
   using: composite
   steps:
     - name: Restore Conan cache
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ${{ inputs.conan-home }}
         key: conan2-${{ runner.os }}-cgal-${{ inputs.arch }}-cppstd17-${{ hashFiles('modules/arrangement_2d/conan.lock') }}
