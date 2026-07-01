@@ -134,15 +134,8 @@ def add_module_version_string(self, s):
     self.module_version_string += "." + s
 
 
-def get_ciallo_version_status():
-    git_hash = get_git_info()["git_hash"]
-    if not git_hash:
-        return None
-    return "ciallo.g" + git_hash[:9]
-
-
 def get_version_info(module_version_string="", silent=False):
-    build_name = "ciallo"
+    build_name = "custom_build"
     if os.getenv("BUILD_NAME") is not None:
         build_name = str(os.getenv("BUILD_NAME"))
         if not silent:
@@ -169,12 +162,6 @@ def get_version_info(module_version_string="", silent=False):
         version_info["status"] = str(os.getenv("GODOT_VERSION_STATUS"))
         if not silent:
             print_info(f"Using version status '{version_info['status']}', overriding the original '{version.status}'.")
-    else:
-        ciallo_status = get_ciallo_version_status()
-        if ciallo_status:
-            version_info["status"] = ciallo_status
-            if not silent:
-                print_info(f"Using default Ciallo version status '{ciallo_status}'.")
 
     return version_info
 

@@ -33,6 +33,17 @@
 #include "core/os/time.h"
 #include "core/version.h"
 
+// Ciallo: release builds embed the git short-sha in GODOT_VERSION_STATUS (e.g.
+// "ciallo.g3205a0607") so the bundled NuGet packages get a unique version. This
+// button already prints the sha as a "[hash]" suffix, so using the full status here
+// would show the hash twice. Redefine the two display-only macros to build the label
+// from the (short) build name instead, e.g. "4.6.2.ciallo". Confined to this
+// button; project/export metadata keep using the full status.
+#undef GODOT_VERSION_FULL_CONFIG
+#define GODOT_VERSION_FULL_CONFIG GODOT_VERSION_NUMBER "." GODOT_VERSION_BUILD
+#undef GODOT_VERSION_FULL_BUILD
+#define GODOT_VERSION_FULL_BUILD GODOT_VERSION_FULL_CONFIG
+
 String _get_version_string(EditorVersionButton::VersionFormat p_format) {
 	String main;
 	switch (p_format) {
