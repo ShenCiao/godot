@@ -89,12 +89,7 @@ jobs:
         run: |
           scons platform=windows target=editor \
             production=yes \
-            module_mono_enabled=yes \
             windows_subsystem=console \
-            debug_symbols=no \
-            deprecated=no \
-            accesskit=no \
-            opengl3=no \
             d3d12=${{ steps.d3d12-sdk.outputs.enabled }}
           ls -l bin/
 
@@ -201,12 +196,7 @@ jobs:
           GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
         run: |
           scons platform=linuxbsd target=editor \
-            production=yes \
-            module_mono_enabled=yes \
-            debug_symbols=no \
-            deprecated=no \
-            accesskit=no \
-            opengl3=no
+            production=yes
           ls -l bin/
 
       - name: Locate .NET editor binary
@@ -319,11 +309,6 @@ jobs:
         run: |
           scons platform=macos target=editor arch=arm64 \
             production=yes \
-            module_mono_enabled=yes \
-            debug_symbols=no \
-            deprecated=no \
-            accesskit=no \
-            opengl3=no \
             vulkan=${{ steps.vulkan-sdk.outputs.enabled }}
           ls -l bin/
 
