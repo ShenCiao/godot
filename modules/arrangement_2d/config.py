@@ -1,7 +1,4 @@
 def can_build(env, platform):
-    if env["target"] != "editor":
-        return False
-
     if platform == "macos":
         return env["arch"] == "arm64"
 
