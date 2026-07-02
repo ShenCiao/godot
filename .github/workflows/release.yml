@@ -315,6 +315,12 @@ jobs:
             git push origin gh-pages
           fi
 
+      - name: Upload static NuGet feed Pages artifact
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/feed
+
       - name: Package editor
         id: package
         shell: bash
@@ -339,6 +345,24 @@ jobs:
         with:
           files: ${{ steps.package.outputs.archive }}
           fail_on_unmatched_files: true
+
+  deploy-pages:
+    name: Deploy static NuGet feed to Pages
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: linux-build
+    runs-on: ubuntu-22.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+        with:
+          timeout: 1800000
 
   macos-build:
     name: macOS Editor
