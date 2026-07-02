@@ -2,6 +2,8 @@ name: Ciallo Godot Release
 
 on:
   push:
+    branches:
+      - ciallo
     tags:
       - "v*"
   workflow_dispatch:
@@ -86,10 +88,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ${{ env.SCONS_CACHE }}
-          key: scons-windows-editor-${{ github.ref_name }}-${{ github.sha }}
+          key: scons-windows-editor|${{ github.event.repository.default_branch }}|${{ github.sha }}
           restore-keys: |
-            scons-windows-editor-${{ github.ref_name }}-
-            scons-windows-editor-
+            scons-windows-editor|${{ github.event.repository.default_branch }}|
 
       - name: Build editor
         shell: bash
@@ -105,11 +106,12 @@ jobs:
           ls -l bin/
 
       - name: Save SCons cache
-        if: always()
+        if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
         uses: actions/cache/save@v5
+        continue-on-error: true
         with:
           path: ${{ env.SCONS_CACHE }}
-          key: scons-windows-editor-${{ github.ref_name }}-${{ github.sha }}
+          key: scons-windows-editor|${{ github.event.repository.default_branch }}|${{ github.sha }}
 
       - name: Locate .NET editor binary
         id: editor
@@ -190,10 +192,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ${{ env.SCONS_CACHE }}
-          key: scons-linux-editor-${{ github.ref_name }}-${{ github.sha }}
+          key: scons-linux-editor|${{ github.event.repository.default_branch }}|${{ github.sha }}
           restore-keys: |
-            scons-linux-editor-${{ github.ref_name }}-
-            scons-linux-editor-
+            scons-linux-editor|${{ github.event.repository.default_branch }}|
 
       - name: Build editor
         shell: bash
@@ -207,11 +208,12 @@ jobs:
           ls -l bin/
 
       - name: Save SCons cache
-        if: always()
+        if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
         uses: actions/cache/save@v5
+        continue-on-error: true
         with:
           path: ${{ env.SCONS_CACHE }}
-          key: scons-linux-editor-${{ github.ref_name }}-${{ github.sha }}
+          key: scons-linux-editor|${{ github.event.repository.default_branch }}|${{ github.sha }}
 
       - name: Locate .NET editor binary
         id: editor
@@ -410,10 +412,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ${{ env.SCONS_CACHE }}
-          key: scons-macos-editor-${{ github.ref_name }}-${{ github.sha }}
+          key: scons-macos-editor|${{ github.event.repository.default_branch }}|${{ github.sha }}
           restore-keys: |
-            scons-macos-editor-${{ github.ref_name }}-
-            scons-macos-editor-
+            scons-macos-editor|${{ github.event.repository.default_branch }}|
 
       - name: Build editor
         shell: bash
@@ -428,11 +429,12 @@ jobs:
           ls -l bin/
 
       - name: Save SCons cache
-        if: always()
+        if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
         uses: actions/cache/save@v5
+        continue-on-error: true
         with:
           path: ${{ env.SCONS_CACHE }}
-          key: scons-macos-editor-${{ github.ref_name }}-${{ github.sha }}
+          key: scons-macos-editor|${{ github.event.repository.default_branch }}|${{ github.sha }}
 
       - name: Locate .NET editor binary
         id: editor
@@ -533,10 +535,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ${{ env.SCONS_CACHE }}
-          key: scons-windows-templates-${{ github.ref_name }}-${{ github.sha }}
+          key: scons-windows-templates|${{ github.event.repository.default_branch }}|${{ github.sha }}
           restore-keys: |
-            scons-windows-templates-${{ github.ref_name }}-
-            scons-windows-templates-
+            scons-windows-templates|${{ github.event.repository.default_branch }}|
 
       - name: Build export templates
         shell: bash
@@ -555,11 +556,12 @@ jobs:
           ls -l bin/
 
       - name: Save SCons cache
-        if: always()
+        if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
         uses: actions/cache/save@v5
+        continue-on-error: true
         with:
           path: ${{ env.SCONS_CACHE }}
-          key: scons-windows-templates-${{ github.ref_name }}-${{ github.sha }}
+          key: scons-windows-templates|${{ github.event.repository.default_branch }}|${{ github.sha }}
 
       - name: Collect templates with export filenames
         shell: bash
@@ -622,10 +624,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ${{ env.SCONS_CACHE }}
-          key: scons-linux-templates-${{ github.ref_name }}-${{ github.sha }}
+          key: scons-linux-templates|${{ github.event.repository.default_branch }}|${{ github.sha }}
           restore-keys: |
-            scons-linux-templates-${{ github.ref_name }}-
-            scons-linux-templates-
+            scons-linux-templates|${{ github.event.repository.default_branch }}|
 
       - name: Build export templates
         shell: bash
@@ -643,11 +644,12 @@ jobs:
           ls -l bin/
 
       - name: Save SCons cache
-        if: always()
+        if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
         uses: actions/cache/save@v5
+        continue-on-error: true
         with:
           path: ${{ env.SCONS_CACHE }}
-          key: scons-linux-templates-${{ github.ref_name }}-${{ github.sha }}
+          key: scons-linux-templates|${{ github.event.repository.default_branch }}|${{ github.sha }}
 
       - name: Collect templates with export filenames
         shell: bash
@@ -717,10 +719,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ${{ env.SCONS_CACHE }}
-          key: scons-macos-templates-${{ github.ref_name }}-${{ github.sha }}
+          key: scons-macos-templates|${{ github.event.repository.default_branch }}|${{ github.sha }}
           restore-keys: |
-            scons-macos-templates-${{ github.ref_name }}-
-            scons-macos-templates-
+            scons-macos-templates|${{ github.event.repository.default_branch }}|
 
       - name: Build export templates
         shell: bash
@@ -760,11 +761,12 @@ jobs:
           ls -lh templates_out/
 
       - name: Save SCons cache
-        if: always()
+        if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
         uses: actions/cache/save@v5
+        continue-on-error: true
         with:
           path: ${{ env.SCONS_CACHE }}
-          key: scons-macos-templates-${{ github.ref_name }}-${{ github.sha }}
+          key: scons-macos-templates|${{ github.event.repository.default_branch }}|${{ github.sha }}
 
       - name: Upload templates
         uses: actions/upload-artifact@v7
