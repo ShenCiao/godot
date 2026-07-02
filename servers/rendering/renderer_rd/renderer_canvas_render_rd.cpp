@@ -2371,7 +2371,7 @@ void RendererCanvasRenderRD::_render_batch_items(RenderTarget p_to_render_target
 
 	if (!has_instances) {
 		if (clear) {
-			RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(framebuffer, RD::DRAW_CLEAR_COLOR_0, clear_color, 1.0f, 0, Rect2(), RDD::BreadcrumbMarker::UI_PASS);
+			RD::get_singleton()->draw_list_begin(framebuffer, RD::DRAW_CLEAR_COLOR_0, clear_color, 1.0f, 0, Rect2(), RDD::BreadcrumbMarker::UI_PASS);
 			RD::get_singleton()->draw_list_end();
 		}
 		state.current_batch_index = 0;
