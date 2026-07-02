@@ -299,6 +299,10 @@ jobs:
           # Push all built packages. --force lets a re-run of the same tag overwrite.
           sleet push ./nupkgs_out --config "$RUNNER_TEMP/sleet.json" --source feed --force
 
+          # Disable Jekyll so GitHub Pages serves the feed files verbatim
+          # (Jekyll would otherwise ignore paths and files starting with "_").
+          touch "$FEED_DIR/.nojekyll"
+
           # Commit and push the regenerated static feed back to gh-pages.
           cd "$FEED_DIR"
           git config user.name "github-actions[bot]"
