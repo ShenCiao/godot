@@ -260,7 +260,7 @@ jobs:
           test -f "./nupkgs_out/GodotSharpEditor.${VERSION}.nupkg"
           ls -lh ./nupkgs_out/
 
-      - name: Publish SDK packages to static NuGet feed (gh-pages)
+      - name: Publish SDK packages to static NuGet feed
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         env:
@@ -272,12 +272,16 @@ jobs:
           dotnet tool install --global Sleet
           export PATH="$PATH:$HOME/.dotnet/tools"
 
-          # Clone the gh-pages branch that hosts the feed.
+          # The feed is stored on the gh-pages branch, used as Sleet's persistent
+          # storage so historical package versions survive across releases.
+          # Deployment happens via upload-pages-artifact/deploy-pages below
+          # (Pages is in "GitHub Actions" mode), so pushing this branch does not
+          # trigger the built-in "pages-build-deployment" workflow.
           FEED_DIR="$RUNNER_TEMP/feed"
           git clone --branch gh-pages --single-branch \
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$FEED_DIR"
 
-          # Sleet configuration: local folder source rooted at the gh-pages clone,
+          # Sleet configuration: local folder source rooted at the feed clone,
           # with the public GitHub Pages URL as the base URI (absolute links in index.json).
           cat > "$RUNNER_TEMP/sleet.json" <<'JSON'
           {
@@ -303,7 +307,7 @@ jobs:
           # (Jekyll would otherwise ignore paths and files starting with "_").
           touch "$FEED_DIR/.nojekyll"
 
-          # Commit and push the regenerated static feed back to gh-pages.
+          # Commit and push the regenerated static feed back to the storage branch.
           cd "$FEED_DIR"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

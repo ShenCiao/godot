@@ -85,15 +85,25 @@ MSBuild 的 SDK 版本**不支持**通配或范围，必须是精确版本——
 
    （或直接用 VSCode 的 `Build: Windows Debug Gen Glue` 任务后再手动推包。）
 
-2. 游戏仓：临时在 `NuGet.Config` 里**额外**加一条本地源指向上面的目录，
-   并把 csproj 的版本改成本地构建的 `g<sha>`，联调：
+2. 本机：用 .NET CLI 把这个目录注册成**用户级**本地 NuGet 源，然后在游戏仓把
+   csproj 的版本改成本地构建的 `g<sha>`，联调：
 
-   ```xml
-   <add key="local-dev" value="/abs/path/to/godot/nupkgs_out" />
+   ```bash
+   dotnet nuget add source /abs/path/to/godot/nupkgs_out --name ciallo-local-godot
    ```
 
-   > 这条本地源改动是**临时的，不要提交**。可以放进 `NuGet.Config` 后用 `git stash`
-   > 或干脆在本机维护一份未跟踪的覆盖，联调完删掉。
+   > 这和 Godot 官方文档推荐的 `dotnet nuget add source <my_local_source> --name MyLocalNugetSource`
+   > 是同一种做法。它会写入当前用户的 NuGet 配置，不会改游戏仓里的 `NuGet.Config`，
+   > 因此不会产生“本地绝对路径被误提交”的 git 噪音。
+
+3. 联调结束后，如果不再需要本地包源，移除它：
+
+   ```bash
+   dotnet nuget remove source ciallo-local-godot
+   ```
+
+   > 如果保留本地源，请确保里面只放自己当前联调需要的包。否则未来 restore 某个已经发布到
+   > 公开源的版本时，NuGet 可能先命中本地目录里的旧包，让构建结果和团队其他人不一致。
 
 #### 发布与合并（关键约定）
 
@@ -117,6 +127,8 @@ C++ 侧的新 API 要让别人也能用，**唯一合法路径**是引擎仓打 
 
 - **不要**把本地包目录、`.nupkg`、或本地临时源拷贝给任何人 / 网盘 / 制品库。
 - **不要**把公开源以外的任何源写进**提交的** `NuGet.Config`。
+- 本地联调源只通过 `dotnet nuget add source` 写入当前用户配置；联调完建议
+  `dotnet nuget remove source ciallo-local-godot`，避免旧本地包长期参与 restore。
 - 需要别人也能用的新 API，**只能**通过引擎仓打 tag → CI 发布到公开源流转。
 - 跨机器自用也按「打 tag 走 CI」处理，不要手搬本地包。
 
@@ -128,5 +140,6 @@ C++ 侧的新 API 要让别人也能用，**唯一合法路径**是引擎仓打 
 |---|---|---|
 | 公开静态 NuGet 源 | 引擎仓 Release CI（Sleet → gh-pages） | 匿名分发 SDK 包，纯 C# 开发者免换编辑器即可还原 |
 | 提交的 `NuGet.Config` | 游戏仓 | 让 Godot SDK 包从公开源还原，普通包仍走 nuget.org |
+| 用户级本地 NuGet 源 | 联调者本机 `dotnet nuget add source` | 只让本机 restore 未发布的临时 SDK 包，避免本地路径进入游戏仓 git 历史 |
 | csproj 写死 `Godot.NET.Sdk/4.6.2-ciallo.g<sha>` | 游戏仓 | 把依赖的引擎版本锁死在 git 里，全队构建一致 |
 | 唯一版本号 `g<sha>` | CI 设 `GODOT_VERSION_STATUS` | 保证包一定匹配对应引擎构建，且不命中旧缓存 |
