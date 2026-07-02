@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/10/nuspec.xsd">
+  <metadata>
+    <id>Godot.NET.Sdk</id>
+    <version>4.6.2-ciallo.g95e5d5f45</version>
+    <authors>Godot Engine contributors</authors>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <projectUrl>https://github.com/godotengine/godot/tree/master/modules/mono/editor/Godot.NET.Sdk</projectUrl>
+    <description>MSBuild .NET Sdk for Godot projects.</description>
+    <copyright>Copyright (c) Godot Engine contributors</copyright>
+    <tags>MSBuildSdk</tags>
+    <packageTypes>
+      <packageType name="MSBuildSdk" />
+    </packageTypes>
+    <repository type="git" url="https://github.com/godotengine/godot/tree/master/modules/mono/editor/Godot.NET.Sdk" commit="95e5d5f45ee206f2fafc0d3f590308c791dea4bc" />
+  </metadata>
+</package>
