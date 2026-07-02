@@ -82,6 +82,15 @@ jobs:
         with:
           arch: x86_64
 
+      - name: Restore SCons cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-windows-editor-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            scons-windows-editor-${{ github.ref_name }}-
+            scons-windows-editor-
+
       - name: Build editor
         shell: bash
         env:
@@ -94,6 +103,13 @@ jobs:
             "cache_path=${SCONS_CACHE}" \
             redirect_build_objects=no
           ls -l bin/
+
+      - name: Save SCons cache
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-windows-editor-${{ github.ref_name }}-${{ github.sha }}
 
       - name: Locate .NET editor binary
         id: editor
@@ -170,6 +186,15 @@ jobs:
         with:
           arch: x86_64
 
+      - name: Restore SCons cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-linux-editor-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            scons-linux-editor-${{ github.ref_name }}-
+            scons-linux-editor-
+
       - name: Build editor
         shell: bash
         env:
@@ -180,6 +205,13 @@ jobs:
             "cache_path=${SCONS_CACHE}" \
             redirect_build_objects=no
           ls -l bin/
+
+      - name: Save SCons cache
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-linux-editor-${{ github.ref_name }}-${{ github.sha }}
 
       - name: Locate .NET editor binary
         id: editor
@@ -342,6 +374,15 @@ jobs:
             echo "enabled=no" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Restore SCons cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-macos-editor-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            scons-macos-editor-${{ github.ref_name }}-
+            scons-macos-editor-
+
       - name: Build editor
         shell: bash
         env:
@@ -353,6 +394,13 @@ jobs:
             "cache_path=${SCONS_CACHE}" \
             redirect_build_objects=no
           ls -l bin/
+
+      - name: Save SCons cache
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-macos-editor-${{ github.ref_name }}-${{ github.sha }}
 
       - name: Locate .NET editor binary
         id: editor
@@ -449,6 +497,15 @@ jobs:
         with:
           arch: x86_64
 
+      - name: Restore SCons cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-windows-templates-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            scons-windows-templates-${{ github.ref_name }}-
+            scons-windows-templates-
+
       - name: Build export templates
         shell: bash
         env:
@@ -464,6 +521,13 @@ jobs:
               redirect_build_objects=no
           done
           ls -l bin/
+
+      - name: Save SCons cache
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-windows-templates-${{ github.ref_name }}-${{ github.sha }}
 
       - name: Collect templates with export filenames
         shell: bash
@@ -522,6 +586,15 @@ jobs:
         with:
           arch: x86_64
 
+      - name: Restore SCons cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-linux-templates-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            scons-linux-templates-${{ github.ref_name }}-
+            scons-linux-templates-
+
       - name: Build export templates
         shell: bash
         env:
@@ -536,6 +609,13 @@ jobs:
               redirect_build_objects=no
           done
           ls -l bin/
+
+      - name: Save SCons cache
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-linux-templates-${{ github.ref_name }}-${{ github.sha }}
 
       - name: Collect templates with export filenames
         shell: bash
@@ -601,6 +681,15 @@ jobs:
             echo "enabled=no" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Restore SCons cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-macos-templates-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            scons-macos-templates-${{ github.ref_name }}-
+            scons-macos-templates-
+
       - name: Build export templates
         shell: bash
         env:
@@ -637,6 +726,13 @@ jobs:
           test -n "$BUNDLE"
           cp "$BUNDLE" templates_out/macos.zip
           ls -lh templates_out/
+
+      - name: Save SCons cache
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-macos-templates-${{ github.ref_name }}-${{ github.sha }}
 
       - name: Upload templates
         uses: actions/upload-artifact@v7
