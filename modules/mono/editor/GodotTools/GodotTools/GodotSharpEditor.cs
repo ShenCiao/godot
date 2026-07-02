@@ -94,10 +94,6 @@ namespace GodotTools
                     try
                     {
                         solution.Save();
-
-                        // Point NuGet at the packages bundled with this editor build, so restore
-                        // works out of the box without any manual NuGet source configuration.
-                        Build.NuGetConfigGenerator.Generate(slnDir);
                     }
                     catch (IOException e)
                     {

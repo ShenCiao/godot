@@ -66,10 +66,6 @@ namespace GodotTools.ProjectEditor
 
             EnsureGodotSdkIsUpToDate(project);
             EnsureTargetFrameworkMatchesMinimumRequirement(project);
-
-            string? projectDir = System.IO.Path.GetDirectoryName(project.Root.FullPath);
-            if (projectDir != null)
-                ProjectGenerator.EnsureGlobalJsonExists(projectDir);
         }
 
         private static void MigrateToProjectSdksStyle(MSBuildProject project, string projectName)

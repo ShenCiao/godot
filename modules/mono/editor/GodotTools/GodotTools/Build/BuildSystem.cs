@@ -20,9 +20,6 @@ namespace GodotTools.Build
         private static Process LaunchBuild(BuildInfo buildInfo, Action<string?>? stdOutHandler,
             Action<string?>? stdErrHandler)
         {
-            if (!NuGetConfigGenerator.GenerateForBuild(buildInfo))
-                throw new InvalidOperationException("Failed to generate NuGet.Config for this Godot editor build.");
-
             string? dotnetPath = DotNetFinder.FindDotNetExe();
 
             if (dotnetPath == null)
@@ -94,9 +91,6 @@ namespace GodotTools.Build
         private static Process LaunchPublish(BuildInfo buildInfo, Action<string?>? stdOutHandler,
             Action<string?>? stdErrHandler)
         {
-            if (!NuGetConfigGenerator.GenerateForBuild(buildInfo))
-                throw new InvalidOperationException("Failed to generate NuGet.Config for this Godot editor build.");
-
             string? dotnetPath = DotNetFinder.FindDotNetExe();
 
             if (dotnetPath == null)

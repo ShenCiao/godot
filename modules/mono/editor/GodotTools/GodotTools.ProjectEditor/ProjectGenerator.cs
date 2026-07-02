@@ -10,9 +10,7 @@ namespace GodotTools.ProjectEditor
 {
     public static class ProjectGenerator
     {
-        public const string GodotSdkAttrValue = "Godot.NET.Sdk";
-
-        public static string GodotSdkVersion => GeneratedGodotNupkgsVersions.GodotNETSdk;
+        public static string GodotSdkAttrValue => $"Godot.NET.Sdk/{GeneratedGodotNupkgsVersions.GodotNETSdk}";
 
         public static string GodotMinimumRequiredTfm => "net8.0";
 
@@ -43,27 +41,6 @@ namespace GodotTools.ProjectEditor
             return root;
         }
 
-        public static void EnsureGlobalJsonExists(string dir)
-        {
-            string path = Path.Combine(dir, "global.json");
-            if (File.Exists(path))
-                return;
-
-            SaveGlobalJson(path);
-        }
-
-        private static void SaveGlobalJson(string path)
-        {
-            string contents =
-                "{\n" +
-                "  \"msbuild-sdks\": {\n" +
-                $"    \"Godot.NET.Sdk\": \"{GodotSdkVersion}\"\n" +
-                "  }\n" +
-                "}\n";
-
-            File.WriteAllText(path, contents, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-        }
-
         public static string GenAndSaveGameProject(string dir, string name)
         {
             if (name.Length == 0)
@@ -75,7 +52,6 @@ namespace GodotTools.ProjectEditor
 
             // Save (without BOM)
             root.Save(path, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            EnsureGlobalJsonExists(dir);
 
             return Guid.NewGuid().ToString().ToUpperInvariant();
         }
