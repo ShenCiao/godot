@@ -85,12 +85,36 @@ namespace GodotTools.ProjectEditor
             var root = project.Root;
             string godotSdkAttrValue = ProjectGenerator.GodotSdkAttrValue;
 
-            if (!string.IsNullOrEmpty(root.Sdk) &&
-                root.Sdk.Trim().Equals(godotSdkAttrValue, StringComparison.OrdinalIgnoreCase))
+            // Do NOT rewrite an SDK reference that is already a valid
+            // 'Godot.NET.Sdk/<version>'. For custom engine builds the SDK version
+            // in the .csproj is the source of truth: it is pinned in git to an exact
+            // package version (e.g. 'Godot.NET.Sdk/4.6.2-ciallo.g<sha>') and restored
+            // from a NuGet feed, independent of the version baked into the running
+            // editor binary. Forcing the editor's own version here would clobber that
+            // pin, break restore against the feed, and rewrite the file on every open.
+            //
+            // We only fill in the SDK when it is missing or malformed (e.g. a freshly
+            // generated project, or a manual edit that dropped the version). Keeping an
+            // existing valid reference untouched means self builds never overwrite the
+            // .csproj; version validation is left to the release CI, not the editor.
+            string sdk = root.Sdk?.Trim() ?? string.Empty;
+            if (IsValidGodotSdkReference(sdk))
                 return;
 
             root.Sdk = godotSdkAttrValue;
             project.HasUnsavedChanges = true;
+        }
+
+        private static bool IsValidGodotSdkReference(string sdk)
+        {
+            // Valid form: 'Godot.NET.Sdk/<non-empty version>'.
+            const string prefix = "Godot.NET.Sdk/";
+
+            if (!sdk.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            string version = sdk.Substring(prefix.Length).Trim();
+            return version.Length > 0;
         }
 
         private static void EnsureTargetFrameworkMatchesMinimumRequirement(MSBuildProject project)
