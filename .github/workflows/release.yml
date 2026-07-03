@@ -131,6 +131,24 @@ jobs:
         run: |
           "${{ steps.editor.outputs.path }}" --headless --generate-mono-glue modules/mono/glue
 
+      - name: Build .NET assemblies
+        shell: bash
+        env:
+          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
+        run: |
+          python modules/mono/build_scripts/build_assemblies.py \
+            --godot-output-dir ./bin \
+            --godot-platform=windows \
+            --no-deprecated
+
+      - name: Verify GodotSharp payload
+        shell: bash
+        run: |
+          test -f ./bin/GodotSharp/Tools/GodotTools.dll
+          test -f ./bin/GodotSharp/Api/Debug/GodotSharp.dll
+          test -f ./bin/GodotSharp/Api/Debug/GodotSharpEditor.dll
+          find ./bin/GodotSharp -maxdepth 3 -type f | sort | head -n 20
+
       - name: Package editor
         id: package
         shell: bash
@@ -261,6 +279,14 @@ jobs:
           test -f "./nupkgs_out/GodotSharp.${VERSION}.nupkg"
           test -f "./nupkgs_out/GodotSharpEditor.${VERSION}.nupkg"
           ls -lh ./nupkgs_out/
+
+      - name: Verify GodotSharp payload
+        shell: bash
+        run: |
+          test -f ./bin/GodotSharp/Tools/GodotTools.dll
+          test -f ./bin/GodotSharp/Api/Debug/GodotSharp.dll
+          test -f ./bin/GodotSharp/Api/Debug/GodotSharpEditor.dll
+          find ./bin/GodotSharp -maxdepth 3 -type f | sort | head -n 20
 
       - name: Publish SDK packages to static NuGet feed
         if: startsWith(github.ref, 'refs/tags/')
@@ -453,6 +479,24 @@ jobs:
         shell: bash
         run: |
           "${{ steps.editor.outputs.path }}" --headless --generate-mono-glue modules/mono/glue
+
+      - name: Build .NET assemblies
+        shell: bash
+        env:
+          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
+        run: |
+          python modules/mono/build_scripts/build_assemblies.py \
+            --godot-output-dir ./bin \
+            --godot-platform=macos \
+            --no-deprecated
+
+      - name: Verify GodotSharp payload
+        shell: bash
+        run: |
+          test -f ./bin/GodotSharp/Tools/GodotTools.dll
+          test -f ./bin/GodotSharp/Api/Debug/GodotSharp.dll
+          test -f ./bin/GodotSharp/Api/Debug/GodotSharpEditor.dll
+          find ./bin/GodotSharp -maxdepth 3 -type f | sort | head -n 20
 
       - name: Package editor
         id: package
