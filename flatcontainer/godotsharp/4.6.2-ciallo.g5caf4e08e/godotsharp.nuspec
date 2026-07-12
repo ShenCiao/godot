@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
+  <metadata>
+    <id>GodotSharp</id>
+    <version>4.6.2-ciallo.g5caf4e08e</version>
+    <authors>Godot Engine contributors</authors>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <projectUrl>https://github.com/godotengine/godot/tree/master/modules/mono/glue/GodotSharp/GodotSharp</projectUrl>
+    <description>Godot C# Core API.</description>
+    <copyright>Copyright (c) Godot Engine contributors</copyright>
+    <repository type="git" url="https://github.com/godotengine/godot/tree/master/modules/mono/glue/GodotSharp/GodotSharp" commit="5caf4e08ed3ea6f4dbb52160410a9dddfda8a0b2" />
+    <dependencies>
+      <group targetFramework="net8.0" />
+    </dependencies>
+  </metadata>
+</package>
