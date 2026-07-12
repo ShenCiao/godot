@@ -692,7 +692,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 
 	{
 		//update canvas state uniform buffer
-		State::Buffer state_buffer;
+		State::Buffer &state_buffer = state.canvas_state;
 
 		Size2i ssize = texture_storage->render_target_get_size(p_to_render_target);
 
@@ -720,6 +720,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		Size2 render_target_size = texture_storage->render_target_get_size(p_to_render_target);
 		state_buffer.screen_pixel_size[0] = 1.0 / render_target_size.x;
 		state_buffer.screen_pixel_size[1] = 1.0 / render_target_size.y;
+		state.canvas_state_screen_texture_size = render_target_size;
 
 		state_buffer.time = state.time;
 		state_buffer.use_pixel_snap = p_snap_2d_vertices_to_pixel;
@@ -777,11 +778,13 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 	RenderTarget to_render_target;
 	to_render_target.render_target = p_to_render_target;
 	to_render_target.use_linear_colors = use_linear_colors;
+	to_render_target.screen_texture_size = texture_storage->render_target_get_size(p_to_render_target);
 
 	struct CanvasGroupStackEntry {
 		Item *owner = nullptr;
 		int buffer_index = 0;
 		RID texture;
+		Size2i texture_size;
 		RenderTarget target;
 	};
 
@@ -819,20 +822,25 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 
 		const int buffer_index = canvas_group_stack.size();
 		const RendererRD::TextureStorage::CanvasGroupBufferRIDs buffer =
-				texture_storage->render_target_prepare_canvas_group_buffer_for_draw(p_to_render_target, buffer_index, Color(0, 0, 0, 0));
+				texture_storage->render_target_prepare_canvas_group_buffer_for_draw(
+						p_to_render_target, buffer_index, p_owner->global_rect_cache,
+						p_owner->canvas_group->blur_mipmaps, Color(0, 0, 0, 0));
 
 		RenderTarget group_target;
 		group_target.render_target = p_to_render_target;
 		group_target.use_linear_colors = use_linear_colors;
 		group_target.framebuffer = buffer.framebuffer;
 		group_target.use_render_target_clear = false;
+		group_target.render_region = Rect2(Vector2(), texture_storage->render_target_get_size(p_to_render_target));
 
 		if (canvas_group_stack.is_empty()) {
 			group_target.screen_texture = texture_storage->render_target_get_rd_texture(p_to_render_target);
+			group_target.screen_texture_size = texture_storage->render_target_get_size(p_to_render_target);
 			group_target.base_uniform_set = get_main_color_uniform_set();
 		} else {
 			const CanvasGroupStackEntry &parent_entry = canvas_group_stack[canvas_group_stack.size() - 1];
 			group_target.screen_texture = parent_entry.texture;
+			group_target.screen_texture_size = parent_entry.texture_size;
 			group_target.base_uniform_set = _ensure_canvas_group_buffer_uniform_set(p_to_render_target, parent_entry.buffer_index, parent_entry.texture);
 		}
 
@@ -840,6 +848,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		entry.owner = p_owner;
 		entry.buffer_index = buffer_index;
 		entry.texture = buffer.texture;
+		entry.texture_size = buffer.size;
 		entry.target = group_target;
 		canvas_group_stack.push_back(entry);
 	};
@@ -851,6 +860,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 
 		const int buffer_index = entry.buffer_index;
 		const RID group_texture = entry.texture;
+		const Size2i group_texture_size = entry.texture_size;
 		if (p_owner->canvas_group->blur_mipmaps) {
 			texture_storage->render_target_gen_canvas_group_buffer_mipmaps(p_to_render_target, buffer_index, p_owner->global_rect_cache);
 		}
@@ -861,11 +871,13 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		composite_target.clear_requested = false;
 
 		p_owner->canvas_group_texture = group_texture;
+		p_owner->canvas_group_texture_size = group_texture_size;
 		p_owner->use_canvas_group = true;
 		items[item_count++] = p_owner;
 		flush_render_items(composite_target);
 		p_owner->use_canvas_group = false;
 		p_owner->canvas_group_texture = RID();
+		p_owner->canvas_group_texture_size = Size2i();
 	};
 
 	while (ci) {
@@ -2261,6 +2273,13 @@ uint32_t RendererCanvasRenderRD::get_pipeline_compilations(RS::PipelineSource p_
 }
 
 void RendererCanvasRenderRD::_render_batch_items(RenderTarget p_to_render_target, int p_item_count, const Transform2D &p_canvas_transform_inverse, Light *p_lights, bool &r_sdf_used, bool p_to_backbuffer, RenderingMethod::RenderInfo *r_render_info) {
+	if (p_item_count > 0 && p_to_render_target.screen_texture_size != state.canvas_state_screen_texture_size) {
+		state.canvas_state.screen_pixel_size[0] = 1.0 / p_to_render_target.screen_texture_size.x;
+		state.canvas_state.screen_pixel_size[1] = 1.0 / p_to_render_target.screen_texture_size.y;
+		state.canvas_state_screen_texture_size = p_to_render_target.screen_texture_size;
+		RD::get_singleton()->buffer_update(state.canvas_state_buffer, 0, sizeof(State::Buffer), &state.canvas_state);
+	}
+
 	// Record batches
 	{
 		RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
@@ -2371,7 +2390,7 @@ void RendererCanvasRenderRD::_render_batch_items(RenderTarget p_to_render_target
 
 	if (!has_instances) {
 		if (clear) {
-			RD::get_singleton()->draw_list_begin(framebuffer, RD::DRAW_CLEAR_COLOR_0, clear_color, 1.0f, 0, Rect2(), RDD::BreadcrumbMarker::UI_PASS);
+			RD::get_singleton()->draw_list_begin(framebuffer, RD::DRAW_CLEAR_COLOR_0, clear_color, 1.0f, 0, p_to_render_target.render_region, RDD::BreadcrumbMarker::UI_PASS);
 			RD::get_singleton()->draw_list_end();
 		}
 		state.current_batch_index = 0;
@@ -2393,7 +2412,7 @@ void RendererCanvasRenderRD::_render_batch_items(RenderTarget p_to_render_target
 
 	RD::FramebufferFormatID fb_format = RD::get_singleton()->framebuffer_get_format(framebuffer);
 
-	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(framebuffer, clear ? RD::DRAW_CLEAR_COLOR_0 : RD::DRAW_DEFAULT_ALL, clear_color, 1.0f, 0, Rect2(), RDD::BreadcrumbMarker::UI_PASS);
+	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(framebuffer, clear ? RD::DRAW_CLEAR_COLOR_0 : RD::DRAW_DEFAULT_ALL, clear_color, 1.0f, 0, p_to_render_target.render_region, RDD::BreadcrumbMarker::UI_PASS);
 
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, fb_uniform_set, BASE_UNIFORM_SET);
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, state.default_transforms_uniform_set, TRANSFORMS_UNIFORM_SET);
@@ -2517,7 +2536,7 @@ void RendererCanvasRenderRD::_record_item_commands(const Item *p_item, RenderTar
 
 				if (p_item->use_canvas_group && p_item->canvas_group->mode == RS::CANVAS_GROUP_MODE_TRANSPARENT && p_item->canvas_group_texture.is_valid()) {
 					rect_texture = p_item->canvas_group_texture;
-					direct_texture_size = RendererRD::TextureStorage::get_singleton()->render_target_get_size(p_render_target.render_target);
+					direct_texture_size = p_item->canvas_group_texture_size;
 					direct_rd_texture = true;
 					use_premul_blend = true;
 					rect_flags &= ~(CANVAS_RECT_MSDF | CANVAS_RECT_LCD);

@@ -335,6 +335,7 @@ public:
 		CanvasGroup *canvas_group = nullptr;
 		bool use_canvas_group = false;
 		RID canvas_group_texture;
+		Size2i canvas_group_texture_size;
 		Rect2 canvas_group_texture_rect;
 		int light_mask;
 		int z_final;
@@ -461,6 +462,7 @@ public:
 			material_owner = nullptr;
 			light_masked = false;
 			canvas_group_texture = RID();
+			canvas_group_texture_size = Size2i();
 			canvas_group_texture_rect = Rect2();
 		}
 
@@ -477,6 +479,7 @@ public:
 			final_clip_owner = nullptr;
 			canvas_group_owner = nullptr;
 			canvas_group_texture = RID();
+			canvas_group_texture_size = Size2i();
 			canvas_group_texture_rect = Rect2();
 			canvas_group_owners.clear();
 			clip = false;

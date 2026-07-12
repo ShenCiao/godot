@@ -96,6 +96,7 @@ public:
 	struct CanvasGroupBufferRIDs {
 		RID texture;
 		RID framebuffer;
+		Size2i size;
 	};
 
 	typedef void (*InvalidationCallback)(bool p_deleted, void *p_userdata);
@@ -394,6 +395,9 @@ private:
 			RID mipmap0;
 			Vector<RID> mipmaps;
 			RID uniform_set;
+			Size2i size;
+			RD::DataFormat format = RD::DATA_FORMAT_R4G4_UNORM_PACK8;
+			bool use_mipmaps = false;
 		};
 
 		Vector<CanvasGroupBuffer> canvas_group_buffers;
@@ -466,10 +470,11 @@ private:
 	mutable RID_Owner<RenderTarget> render_target_owner;
 	RenderTarget *get_render_target(RID p_rid) const { return render_target_owner.get_or_null(p_rid); }
 
-	void _clear_render_target(RenderTarget *rt);
+	void _clear_render_target_canvas_group_buffer(RenderTarget::CanvasGroupBuffer &r_buffer);
+	void _clear_render_target(RenderTarget *rt, bool p_clear_canvas_group_buffers = true);
 	void _update_render_target(RenderTarget *rt);
 	void _create_render_target_backbuffer(RenderTarget *rt);
-	void _create_render_target_canvas_group_buffer(RenderTarget *rt, int p_index);
+	void _create_render_target_canvas_group_buffer(RenderTarget *rt, int p_index, bool p_use_mipmaps);
 	void _render_target_allocate_sdf(RenderTarget *rt);
 	void _render_target_clear_sdf(RenderTarget *rt);
 	Rect2i _render_target_get_sdf_rect(const RenderTarget *rt) const;
@@ -787,7 +792,7 @@ public:
 	void render_target_copy_to_back_buffer(RID p_render_target, const Rect2i &p_region, bool p_gen_mipmaps);
 	void render_target_clear_back_buffer(RID p_render_target, const Rect2i &p_region, const Color &p_color);
 	void render_target_gen_back_buffer_mipmaps(RID p_render_target, const Rect2i &p_region);
-	CanvasGroupBufferRIDs render_target_prepare_canvas_group_buffer_for_draw(RID p_render_target, int p_index, const Color &p_clear_color);
+	CanvasGroupBufferRIDs render_target_prepare_canvas_group_buffer_for_draw(RID p_render_target, int p_index, const Rect2i &p_region, bool p_use_mipmaps, const Color &p_clear_color);
 	void render_target_gen_canvas_group_buffer_mipmaps(RID p_render_target, int p_index, const Rect2i &p_region);
 	RID render_target_get_back_buffer_uniform_set(RID p_render_target, RID p_base_shader);
 

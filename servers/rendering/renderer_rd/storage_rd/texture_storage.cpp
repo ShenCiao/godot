@@ -37,6 +37,13 @@
 
 using namespace RendererRD;
 
+// Reserve CanvasGroup targets in small buckets so pixel-by-pixel viewport growth does not reallocate every frame.
+static constexpr int CANVAS_GROUP_BUFFER_SIZE_GRANULARITY = 64;
+
+static int _get_canvas_group_buffer_capacity(int p_required) {
+	return ((p_required + CANVAS_GROUP_BUFFER_SIZE_GRANULARITY - 1) / CANVAS_GROUP_BUFFER_SIZE_GRANULARITY) * CANVAS_GROUP_BUFFER_SIZE_GRANULARITY;
+}
+
 ///////////////////////////////////////////////////////////////////////////
 // TextureStorage::CanvasTexture
 
@@ -3507,7 +3514,21 @@ RID TextureStorage::RenderTarget::get_framebuffer() {
 	}
 }
 
-void TextureStorage::_clear_render_target(RenderTarget *rt) {
+void TextureStorage::_clear_render_target_canvas_group_buffer(RenderTarget::CanvasGroupBuffer &r_buffer) {
+	if (r_buffer.texture.is_valid()) {
+		RD::get_singleton()->free_rid(r_buffer.texture);
+	}
+	r_buffer.texture = RID();
+	r_buffer.framebuffer = RID();
+	r_buffer.mipmap0 = RID();
+	r_buffer.mipmaps.clear();
+	r_buffer.uniform_set = RID();
+	r_buffer.size = Size2i();
+	r_buffer.format = RD::DATA_FORMAT_R4G4_UNORM_PACK8;
+	r_buffer.use_mipmaps = false;
+}
+
+void TextureStorage::_clear_render_target(RenderTarget *rt, bool p_clear_canvas_group_buffers) {
 	// clear overrides, we assume these are freed by the object that created them
 	rt->overridden.color = RID();
 	rt->overridden.depth = RID();
@@ -3535,12 +3556,12 @@ void TextureStorage::_clear_render_target(RenderTarget *rt) {
 		rt->backbuffer_uniform_set = RID(); //chain deleted
 	}
 
-	for (RenderTarget::CanvasGroupBuffer &buffer : rt->canvas_group_buffers) {
-		if (buffer.texture.is_valid()) {
-			RD::get_singleton()->free_rid(buffer.texture);
+	if (p_clear_canvas_group_buffers) {
+		for (RenderTarget::CanvasGroupBuffer &buffer : rt->canvas_group_buffers) {
+			_clear_render_target_canvas_group_buffer(buffer);
 		}
+		rt->canvas_group_buffers.clear();
 	}
-	rt->canvas_group_buffers.clear();
 
 	_render_target_clear_sdf(rt);
 
@@ -3566,7 +3587,7 @@ void TextureStorage::_update_render_target(RenderTarget *rt) {
 		tex->path = "Render Target (Internal)";
 	}
 
-	_clear_render_target(rt);
+	_clear_render_target(rt, false); // CanvasGroup buffers manage their capacity and format independently.
 
 	if (rt->size.width == 0 || rt->size.height == 0) {
 		return;
@@ -3707,7 +3728,7 @@ void TextureStorage::_create_render_target_backbuffer(RenderTarget *rt) {
 	}
 }
 
-void TextureStorage::_create_render_target_canvas_group_buffer(RenderTarget *rt, int p_index) {
+void TextureStorage::_create_render_target_canvas_group_buffer(RenderTarget *rt, int p_index, bool p_use_mipmaps) {
 	ERR_FAIL_COND(p_index < 0);
 
 	if (p_index >= rt->canvas_group_buffers.size()) {
@@ -3715,15 +3736,22 @@ void TextureStorage::_create_render_target_canvas_group_buffer(RenderTarget *rt,
 	}
 
 	RenderTarget::CanvasGroupBuffer &buffer = rt->canvas_group_buffers.write[p_index];
-	if (buffer.texture.is_valid()) {
+	const bool needs_larger_buffer = buffer.size.x < rt->size.x || buffer.size.y < rt->size.y;
+	const bool needs_mipmaps = p_use_mipmaps && !buffer.use_mipmaps;
+	const bool needs_matching_format = buffer.format != rt->color_format;
+	if (buffer.texture.is_valid() && !needs_larger_buffer && !needs_mipmaps && !needs_matching_format) {
 		return;
 	}
 
-	uint32_t mipmaps_required = Image::get_image_required_mipmaps(rt->size.width, rt->size.height, Image::FORMAT_RGBA8);
+	const Size2i capacity(
+			MAX(buffer.size.x, _get_canvas_group_buffer_capacity(rt->size.x)),
+			MAX(buffer.size.y, _get_canvas_group_buffer_capacity(rt->size.y)));
+	_clear_render_target_canvas_group_buffer(buffer);
+	const uint32_t mipmaps_required = p_use_mipmaps ? Image::get_image_required_mipmaps(capacity.width, capacity.height, Image::FORMAT_RGBA8) : 1;
 	RD::TextureFormat tf;
 	tf.format = rt->color_format;
-	tf.width = rt->size.width;
-	tf.height = rt->size.height;
+	tf.width = capacity.width;
+	tf.height = capacity.height;
 	tf.texture_type = RD::TEXTURE_TYPE_2D;
 	tf.usage_bits = RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
 	tf.mipmaps = mipmaps_required;
@@ -3745,6 +3773,9 @@ void TextureStorage::_create_render_target_canvas_group_buffer(RenderTarget *rt,
 
 		buffer.mipmaps.push_back(mipmap);
 	}
+	buffer.size = capacity;
+	buffer.format = rt->color_format;
+	buffer.use_mipmaps = p_use_mipmaps;
 }
 
 RID TextureStorage::render_target_create() {
@@ -4069,9 +4100,7 @@ RID TextureStorage::render_target_get_rd_canvas_group_buffer(RID p_render_target
 	ERR_FAIL_NULL_V(rt, RID());
 	ERR_FAIL_COND_V(p_index < 0, RID());
 
-	if (p_index >= rt->canvas_group_buffers.size() || !rt->canvas_group_buffers[p_index].texture.is_valid()) {
-		_create_render_target_canvas_group_buffer(rt, p_index);
-	}
+	_create_render_target_canvas_group_buffer(rt, p_index, false);
 
 	return rt->canvas_group_buffers[p_index].texture;
 }
@@ -4081,9 +4110,7 @@ RID TextureStorage::render_target_get_rd_canvas_group_buffer_framebuffer(RID p_r
 	ERR_FAIL_NULL_V(rt, RID());
 	ERR_FAIL_COND_V(p_index < 0, RID());
 
-	if (p_index >= rt->canvas_group_buffers.size() || !rt->canvas_group_buffers[p_index].framebuffer.is_valid()) {
-		_create_render_target_canvas_group_buffer(rt, p_index);
-	}
+	_create_render_target_canvas_group_buffer(rt, p_index, false);
 
 	return rt->canvas_group_buffers[p_index].framebuffer;
 }
@@ -4542,21 +4569,19 @@ void TextureStorage::render_target_gen_back_buffer_mipmaps(RID p_render_target, 
 	RD::get_singleton()->draw_command_end_label();
 }
 
-TextureStorage::CanvasGroupBufferRIDs TextureStorage::render_target_prepare_canvas_group_buffer_for_draw(RID p_render_target, int p_index, const Color &p_clear_color) {
+TextureStorage::CanvasGroupBufferRIDs TextureStorage::render_target_prepare_canvas_group_buffer_for_draw(RID p_render_target, int p_index, const Rect2i &p_region, bool p_use_mipmaps, const Color &p_clear_color) {
 	CanvasGroupBufferRIDs result;
 
 	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
 	ERR_FAIL_NULL_V(rt, result);
 	ERR_FAIL_COND_V(p_index < 0, result);
 
-	if (p_index >= rt->canvas_group_buffers.size() || !rt->canvas_group_buffers[p_index].texture.is_valid()) {
-		_create_render_target_canvas_group_buffer(rt, p_index);
-	}
+	_create_render_target_canvas_group_buffer(rt, p_index, p_use_mipmaps);
 
 	RenderTarget::CanvasGroupBuffer &buffer = rt->canvas_group_buffers.write[p_index];
 
 	Rect2i region;
-	if (_render_target_get_clamped_region(rt, Rect2i(), region)) {
+	if (_render_target_get_clamped_region(rt, p_region, region)) {
 		// RD hazard workaround:
 		// Not using a framebuffer attachment clear for this. CanvasGroup children
 		// render through buffer.mipmap0, a shared slice view, but the group is later
@@ -4576,6 +4601,7 @@ TextureStorage::CanvasGroupBufferRIDs TextureStorage::render_target_prepare_canv
 
 	result.texture = buffer.texture;
 	result.framebuffer = buffer.framebuffer;
+	result.size = buffer.size;
 	return result;
 }
 
@@ -4587,9 +4613,7 @@ void TextureStorage::render_target_gen_canvas_group_buffer_mipmaps(RID p_render_
 	CopyEffects *copy_effects = CopyEffects::get_singleton();
 	ERR_FAIL_NULL(copy_effects);
 
-	if (p_index >= rt->canvas_group_buffers.size() || !rt->canvas_group_buffers[p_index].texture.is_valid()) {
-		_create_render_target_canvas_group_buffer(rt, p_index);
-	}
+	_create_render_target_canvas_group_buffer(rt, p_index, true);
 
 	Rect2i region;
 	if (!_render_target_get_clamped_region(rt, p_region, region)) {
@@ -4599,7 +4623,7 @@ void TextureStorage::render_target_gen_canvas_group_buffer_mipmaps(RID p_render_
 	RenderTarget::CanvasGroupBuffer &buffer = rt->canvas_group_buffers.write[p_index];
 	RD::get_singleton()->draw_command_begin_label("Canvas Group Buffer Mipmaps");
 	RID prev_texture = buffer.mipmap0;
-	Size2i texture_size = rt->size;
+	Size2i texture_size = buffer.size;
 
 	for (int i = 0; i < buffer.mipmaps.size(); i++) {
 		region.position.x >>= 1;

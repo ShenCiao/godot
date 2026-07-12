@@ -610,6 +610,8 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 			float shadow_pixel_size;
 			uint32_t flags;
 		};
+		Buffer canvas_state;
+		Size2i canvas_state_screen_texture_size;
 
 		LocalVector<Batch> canvas_instance_batches;
 		uint32_t current_batch_index = 0;
@@ -683,6 +685,8 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 		RID framebuffer;
 		RID base_uniform_set;
 		RID screen_texture;
+		Size2i screen_texture_size;
+		Rect2 render_region;
 		bool use_render_target_clear = true;
 		bool clear_requested = false;
 		Color clear_color;
