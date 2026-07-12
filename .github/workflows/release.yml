@@ -1,300 +1,138 @@
 name: Ciallo Godot Release
 
+# The workflow dispatch ref picker does not select release code. Every release
+# is built from the current origin/ciallo commit and its generated tag.
 on:
-  push:
-    branches:
-      - ciallo
-    tags:
-      - "v*"
   workflow_dispatch:
-    inputs:
-      version_status:
-        description: "Optional GODOT_VERSION_STATUS override. Defaults to ciallo.g<short-sha>."
-        required: false
-        type: string
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  PYTHONIOENCODING: utf8
-  DOTNET_NOLOGO: true
-  DOTNET_CLI_TELEMETRY_OPTOUT: true
-  CONAN_HOME: ${{ github.workspace }}/.conan2
-  SCONS_CACHE: ${{ github.workspace }}/.scons_cache/
+  group: ciallo-godot-release
+  cancel-in-progress: false
 
 jobs:
-  version:
-    name: Compute version status
+  prepare:
+    name: Tag ciallo release
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     outputs:
-      status: ${{ steps.ver.outputs.status }}
+      ref: ${{ steps.release.outputs.ref }}
+      sha: ${{ steps.release.outputs.sha }}
+      status: ${{ steps.release.outputs.status }}
+      tag: ${{ steps.release.outputs.tag }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Compute version status
-        id: ver
-        shell: bash
-        run: |
-          if [ -n "${{ inputs.version_status }}" ]; then
-            STATUS="${{ inputs.version_status }}"
-          else
-            STATUS="ciallo.g$(git rev-parse --short=9 HEAD)"
-          fi
-          echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
-          echo "Using version status '${STATUS}'."
-
-  windows-build:
-    name: Windows Editor
-    needs: version
-    runs-on: windows-latest
-    timeout-minutes: 180
-    steps:
-      - name: Checkout
+      - name: Checkout ciallo
         uses: actions/checkout@v5
         with:
-          submodules: recursive
+          ref: ciallo
+          fetch-depth: 0
+          token: ${{ github.token }}
 
-      - name: Setup Python and SCons
-        uses: ./.github/actions/godot-deps
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Download Direct3D 12 SDK components
-        id: d3d12-sdk
+      - name: Read version and create release tag
+        id: release
         shell: bash
-        run: |
-          if python ./misc/scripts/install_d3d12_sdk_windows.py; then
-            echo "enabled=yes" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::Direct3D 12 SDK installation failed; building without D3D12 support."
-            echo "enabled=no" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Setup arrangement_2d Conan dependencies
-        uses: ./.github/actions/arrangement-conan
-        with:
-          arch: x86_64
-
-      - name: Restore SCons cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ env.SCONS_CACHE }}
-          key: scons-windows-editor|${{ github.event.repository.default_branch }}|${{ github.sha }}
-          restore-keys: |
-            scons-windows-editor|${{ github.event.repository.default_branch }}|
-
-      - name: Build editor
-        shell: bash
-        env:
-          BUILD_NAME: ciallo
-          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
-        run: |
-          scons platform=windows target=editor \
-            windows_subsystem=console \
-            d3d12=${{ steps.d3d12-sdk.outputs.enabled }} \
-            "cache_path=${SCONS_CACHE}" \
-            redirect_build_objects=no
-          ls -l bin/
-
-      - name: Save SCons cache
-        if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: ${{ env.SCONS_CACHE }}
-          key: scons-windows-editor|${{ github.event.repository.default_branch }}|${{ github.sha }}
-
-      - name: Locate .NET editor binary
-        id: editor
-        shell: bash
-        run: |
-          EDITOR_BIN="$(find ./bin -maxdepth 1 -type f -name 'godot.windows.editor*.mono*' \
-            ! -name '*.console.exe' ! -name '*.console' ! -name '*.pdb' ! -name '*.lib' ! -name '*.exp' \
-            | sort | head -n1)"
-          if [ -z "$EDITOR_BIN" ]; then
-            echo "Could not find .NET editor binary in bin/"; ls -l bin/; exit 1
-          fi
-          echo "path=${EDITOR_BIN}" >> "$GITHUB_OUTPUT"
-          echo "Editor binary: ${EDITOR_BIN}"
-
-      - name: Generate C# glue
-        shell: bash
-        run: |
-          "${{ steps.editor.outputs.path }}" --headless --generate-mono-glue modules/mono/glue
-
-      - name: Build .NET assemblies
-        shell: bash
-        env:
-          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
-        run: |
-          python modules/mono/build_scripts/build_assemblies.py \
-            --godot-output-dir ./bin \
-            --godot-platform=windows \
-            --no-deprecated
-
-      - name: Package editor
-        id: package
-        shell: bash
-        run: |
-          rm -rf bin/build_deps bin/obj
-          rm -f bin/*.exp bin/*.lib bin/*.pdb 2>/dev/null || true
-          ARCHIVE="godot-windows-x86_64-${{ needs.version.outputs.status }}.zip"
-          7z a "$ARCHIVE" ./bin/* >/dev/null
-          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
-          ls -lh "$ARCHIVE"
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: godot-windows-x86_64-${{ needs.version.outputs.status }}
-          path: ${{ steps.package.outputs.archive }}
-
-      - name: Publish to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v3
-        with:
-          files: ${{ steps.package.outputs.archive }}
-          fail_on_unmatched_files: true
-
-  linux-build:
-    name: Linux Editor
-    needs: version
-    runs-on: ubuntu-22.04
-    timeout-minutes: 180
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - name: Setup Python and SCons
-        uses: ./.github/actions/godot-deps
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libwayland-bin \
-            libx11-dev libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev \
-            libwayland-dev libgl1-mesa-dev libglu1-mesa-dev libasound2-dev \
-            libpulse-dev libudev-dev libxkbcommon-dev
-
-      - name: Setup arrangement_2d Conan dependencies
-        uses: ./.github/actions/arrangement-conan
-        with:
-          arch: x86_64
-
-      - name: Restore SCons cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ env.SCONS_CACHE }}
-          key: scons-linux-editor|${{ github.event.repository.default_branch }}|${{ github.sha }}
-          restore-keys: |
-            scons-linux-editor|${{ github.event.repository.default_branch }}|
-
-      - name: Build editor
-        shell: bash
-        env:
-          BUILD_NAME: ciallo
-          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
-        run: |
-          scons platform=linuxbsd target=editor \
-            "cache_path=${SCONS_CACHE}" \
-            redirect_build_objects=no
-          ls -l bin/
-
-      - name: Save SCons cache
-        if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: ${{ env.SCONS_CACHE }}
-          key: scons-linux-editor|${{ github.event.repository.default_branch }}|${{ github.sha }}
-
-      - name: Locate .NET editor binary
-        id: editor
-        shell: bash
-        run: |
-          EDITOR_BIN="$(find ./bin -maxdepth 1 -type f -name 'godot.linuxbsd.editor*.mono*' \
-            ! -name '*.console.exe' ! -name '*.console' ! -name '*.pdb' ! -name '*.lib' ! -name '*.exp' \
-            | sort | head -n1)"
-          if [ -z "$EDITOR_BIN" ]; then
-            echo "Could not find .NET editor binary in bin/"; ls -l bin/; exit 1
-          fi
-          echo "path=${EDITOR_BIN}" >> "$GITHUB_OUTPUT"
-          echo "Editor binary: ${EDITOR_BIN}"
-
-      - name: Generate C# glue
-        shell: bash
-        run: |
-          "${{ steps.editor.outputs.path }}" --headless --generate-mono-glue modules/mono/glue
-
-      - name: Upload C# glue (for template builds)
-        uses: actions/upload-artifact@v7
-        with:
-          name: mono-glue
-          path: modules/mono/glue/
-          if-no-files-found: error
-
-      - name: Build .NET assemblies and SDK NuGet packages
-        shell: bash
-        env:
-          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
-        run: |
-          mkdir -p ./nupkgs_out
-          python modules/mono/build_scripts/build_assemblies.py \
-            --godot-output-dir ./bin \
-            --godot-platform=linuxbsd \
-            --push-nupkgs-local ./nupkgs_out \
-            --no-deprecated
-
-      - name: Verify SDK NuGet packages
-        shell: bash
-        run: |
-          VERSION="$(python -c 'import version; print(f"{version.major}.{version.minor}.{version.patch}")')-${{ needs.version.outputs.status }}"
-          test -f "./nupkgs_out/Godot.NET.Sdk.${VERSION}.nupkg"
-          test -f "./nupkgs_out/Godot.SourceGenerators.${VERSION}.nupkg"
-          test -f "./nupkgs_out/GodotSharp.${VERSION}.nupkg"
-          test -f "./nupkgs_out/GodotSharpEditor.${VERSION}.nupkg"
-          ls -lh ./nupkgs_out/
-
-      - name: Publish SDK packages to static NuGet feed
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
-          # Install Sleet (static NuGet v3 feed generator).
+          git fetch origin +refs/heads/ciallo:refs/remotes/origin/ciallo --tags
+          git checkout --detach origin/ciallo
+          head_sha="$(git rev-parse HEAD)"
+
+          read -r major minor patch upstream_status < <(
+            python -c 'import version; print(version.major, version.minor, version.patch, version.status)'
+          )
+          if [ "$upstream_status" != "stable" ]; then
+            echo "Refusing to release Godot status '$upstream_status'; version.py must be stable."
+            exit 1
+          fi
+
+          godot_version="$major.$minor.$patch"
+          version_status="ciallo.g$(git rev-parse --short=9 HEAD)"
+          base_tag="v${godot_version}-ciallo"
+          last_number=0
+          existing_tag=""
+
+          while IFS= read -r tag; do
+            suffix="${tag#"$base_tag."}"
+            if [[ ! "$suffix" =~ ^[1-9][0-9]*$ ]]; then
+              continue
+            fi
+            if (( suffix > last_number )); then
+              last_number="$suffix"
+            fi
+            if [ "$(git rev-list -n 1 "$tag")" = "$head_sha" ]; then
+              existing_tag="$tag"
+            fi
+          done < <(git tag --list "${base_tag}.*" --sort=version:refname)
+
+          if [ -n "$existing_tag" ]; then
+            release_tag="$existing_tag"
+            echo "Reusing $release_tag for origin/ciallo@$head_sha."
+          else
+            release_tag="${base_tag}.$((last_number + 1))"
+            git config user.name "${{ github.actor }}"
+            git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+            git tag -a "$release_tag" "$head_sha" -m "Ciallo Godot $godot_version ($version_status)"
+            git push origin "refs/tags/$release_tag"
+            echo "Created $release_tag for origin/ciallo@$head_sha."
+          fi
+
+          {
+            echo "ref=$release_tag"
+            echo "sha=$head_sha"
+            echo "status=$version_status"
+            echo "tag=$release_tag"
+          } >> "$GITHUB_OUTPUT"
+          echo "Using version status '$version_status'."
+
+  build:
+    name: Build release artifacts
+    needs: prepare
+    permissions:
+      contents: read
+    uses: ./.github/workflows/_build.yml
+    with:
+      source_ref: ${{ needs.prepare.outputs.ref }}
+      source_sha: ${{ needs.prepare.outputs.sha }}
+      version_status: ${{ needs.prepare.outputs.status }}
+      produce_artifacts: true
+
+  publish-feed:
+    name: Publish SDK feed
+    needs: [prepare, build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Download SDK NuGet packages
+        uses: actions/download-artifact@v6
+        with:
+          name: godot-sdk-nupkgs-${{ needs.prepare.outputs.status }}
+          path: nupkgs_out
+
+      - name: Publish SDK packages to static NuGet feed
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VERSION_STATUS: ${{ needs.prepare.outputs.status }}
+        run: |
+          set -euo pipefail
+
           dotnet tool install --global Sleet
           export PATH="$PATH:$HOME/.dotnet/tools"
 
-          # The feed is stored on the gh-pages branch, used as Sleet's persistent
-          # storage so historical package versions survive across releases.
-          # Deployment happens via upload-pages-artifact/deploy-pages below
-          # (Pages is in "GitHub Actions" mode), so pushing this branch does not
-          # trigger the built-in "pages-build-deployment" workflow.
           FEED_DIR="$RUNNER_TEMP/feed"
           git clone --branch gh-pages --single-branch \
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$FEED_DIR"
 
-          # Sleet configuration: local folder source rooted at the feed clone,
-          # with the public GitHub Pages URL as the base URI (absolute links in index.json).
           cat > "$RUNNER_TEMP/sleet.json" <<'JSON'
           {
             "sources": [
@@ -309,17 +147,10 @@ jobs:
           JSON
           sed -i "s#FEED_DIR_PLACEHOLDER#${FEED_DIR}#" "$RUNNER_TEMP/sleet.json"
 
-          # Initialize the feed on first run (idempotent; ignore if already initialized).
           sleet init --config "$RUNNER_TEMP/sleet.json" --source feed || true
-
-          # Push all built packages. --force lets a re-run of the same tag overwrite.
           sleet push ./nupkgs_out --config "$RUNNER_TEMP/sleet.json" --source feed --force
-
-          # Disable Jekyll so GitHub Pages serves the feed files verbatim
-          # (Jekyll would otherwise ignore paths and files starting with "_").
           touch "$FEED_DIR/.nojekyll"
 
-          # Commit and push the regenerated static feed back to the storage branch.
           cd "$FEED_DIR"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -327,45 +158,18 @@ jobs:
           if git diff --cached --quiet; then
             echo "Feed unchanged; nothing to commit."
           else
-            git commit -m "Publish SDK packages for ${{ needs.version.outputs.status }}"
+            git commit -m "Publish SDK packages for $VERSION_STATUS"
             git push origin gh-pages
           fi
 
       - name: Upload static NuGet feed Pages artifact
-        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-pages-artifact@v3
         with:
           path: ${{ runner.temp }}/feed
 
-      - name: Package editor
-        id: package
-        shell: bash
-        run: |
-          rm -rf ./bin/build_deps ./bin/obj
-          strip bin/godot.* 2>/dev/null || true
-          chmod +x bin/godot.* 2>/dev/null || true
-          ARCHIVE="godot-linuxbsd-x86_64-${{ needs.version.outputs.status }}.zip"
-          (cd bin && zip -r "../$ARCHIVE" . >/dev/null)
-          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
-          ls -lh "$ARCHIVE"
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: godot-linuxbsd-x86_64-${{ needs.version.outputs.status }}
-          path: ${{ steps.package.outputs.archive }}
-
-      - name: Publish to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v3
-        with:
-          files: ${{ steps.package.outputs.archive }}
-          fail_on_unmatched_files: true
-
   deploy-pages:
     name: Deploy static NuGet feed to Pages
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: linux-build
+    needs: publish-feed
     runs-on: ubuntu-22.04
     permissions:
       pages: write
@@ -380,471 +184,25 @@ jobs:
         with:
           timeout: 1800000
 
-  macos-build:
-    name: macOS Editor
-    needs: version
-    runs-on: macos-26
-    timeout-minutes: 180
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - name: Select Xcode 26
-        run: sudo xcode-select -s /Applications/Xcode_26.0.1.app
-
-      - name: Setup Python and SCons
-        uses: ./.github/actions/godot-deps
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Setup arrangement_2d Conan dependencies
-        uses: ./.github/actions/arrangement-conan
-        with:
-          arch: armv8
-
-      - name: Setup Vulkan SDK
-        id: vulkan-sdk
-        shell: bash
-        run: |
-          if sh misc/scripts/install_vulkan_sdk_macos.sh; then
-            echo "enabled=yes" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::macOS Vulkan SDK installation failed; building without Vulkan support."
-            echo "enabled=no" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Restore SCons cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ env.SCONS_CACHE }}
-          key: scons-macos-editor|${{ github.event.repository.default_branch }}|${{ github.sha }}
-          restore-keys: |
-            scons-macos-editor|${{ github.event.repository.default_branch }}|
-
-      - name: Build editor
-        shell: bash
-        env:
-          BUILD_NAME: ciallo
-          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
-        run: |
-          scons platform=macos target=editor arch=arm64 \
-            vulkan=${{ steps.vulkan-sdk.outputs.enabled }} \
-            "cache_path=${SCONS_CACHE}" \
-            redirect_build_objects=no
-          ls -l bin/
-
-      - name: Save SCons cache
-        if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: ${{ env.SCONS_CACHE }}
-          key: scons-macos-editor|${{ github.event.repository.default_branch }}|${{ github.sha }}
-
-      - name: Locate .NET editor binary
-        id: editor
-        shell: bash
-        run: |
-          EDITOR_BIN="$(find ./bin -maxdepth 1 -type f -name 'godot.macos.editor*.mono*' \
-            ! -name '*.console.exe' ! -name '*.console' ! -name '*.pdb' ! -name '*.lib' ! -name '*.exp' \
-            | sort | head -n1)"
-          if [ -z "$EDITOR_BIN" ]; then
-            echo "Could not find .NET editor binary in bin/"; ls -l bin/; exit 1
-          fi
-          echo "path=${EDITOR_BIN}" >> "$GITHUB_OUTPUT"
-          echo "Editor binary: ${EDITOR_BIN}"
-
-      - name: Generate C# glue
-        shell: bash
-        run: |
-          "${{ steps.editor.outputs.path }}" --headless --generate-mono-glue modules/mono/glue
-
-      - name: Build .NET assemblies
-        shell: bash
-        env:
-          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
-        run: |
-          python modules/mono/build_scripts/build_assemblies.py \
-            --godot-output-dir ./bin \
-            --godot-platform=macos \
-            --no-deprecated
-
-      - name: Package editor
-        id: package
-        shell: bash
-        run: |
-          rm -rf ./bin/build_deps ./bin/obj
-          strip bin/godot.* 2>/dev/null || true
-          chmod +x bin/godot.* 2>/dev/null || true
-          ARCHIVE="godot-macos-arm64-${{ needs.version.outputs.status }}.zip"
-          (cd bin && zip -r "../$ARCHIVE" . >/dev/null)
-          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
-          ls -lh "$ARCHIVE"
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: godot-macos-arm64-${{ needs.version.outputs.status }}
-          path: ${{ steps.package.outputs.archive }}
-
-      - name: Publish to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v3
-        with:
-          files: ${{ steps.package.outputs.archive }}
-          fail_on_unmatched_files: true
-
-  # ---------------------------------------------------------------------------
-  # Export templates
-  #
-  # Templates reuse the C# glue generated by the Linux editor job (glue is
-  # platform-independent, generated once, shared via the "mono-glue" artifact).
-  # Build flags follow godotengine/godot's official CI for export templates:
-  # only `debug_symbols=no` (NOT `production=yes`, which bloats binaries — see
-  # the "avoid-production-yes-build-flag" project memory). 3D physics/navigation
-  # are disabled here (templates only; the editor rejects these flags).
-  # ---------------------------------------------------------------------------
-
-  windows-templates:
-    name: Windows Export Templates
-    needs: [version, linux-build]
-    runs-on: windows-latest
-    timeout-minutes: 180
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - name: Setup Python and SCons
-        uses: ./.github/actions/godot-deps
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Download C# glue
-        uses: actions/download-artifact@v6
-        with:
-          name: mono-glue
-          path: modules/mono/glue/
-
-      - name: Download Direct3D 12 SDK components
-        id: d3d12-sdk
-        shell: bash
-        run: |
-          if python ./misc/scripts/install_d3d12_sdk_windows.py; then
-            echo "enabled=yes" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::Direct3D 12 SDK installation failed; building without D3D12 support."
-            echo "enabled=no" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Setup arrangement_2d Conan dependencies
-        uses: ./.github/actions/arrangement-conan
-        with:
-          arch: x86_64
-
-      - name: Restore SCons cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ env.SCONS_CACHE }}
-          key: scons-windows-templates|${{ github.event.repository.default_branch }}|${{ github.sha }}
-          restore-keys: |
-            scons-windows-templates|${{ github.event.repository.default_branch }}|
-
-      - name: Build export templates
-        shell: bash
-        env:
-          BUILD_NAME: ciallo
-          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
-        run: |
-          for TARGET in template_release template_debug; do
-            scons platform=windows target=$TARGET arch=x86_64 \
-              d3d12=${{ steps.d3d12-sdk.outputs.enabled }} \
-              debug_symbols=no \
-              disable_physics_3d=yes disable_navigation_3d=yes \
-              "cache_path=${SCONS_CACHE}" \
-              redirect_build_objects=no
-          done
-          ls -l bin/
-
-      - name: Save SCons cache
-        if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: ${{ env.SCONS_CACHE }}
-          key: scons-windows-templates|${{ github.event.repository.default_branch }}|${{ github.sha }}
-
-      - name: Collect templates with export filenames
-        shell: bash
-        run: |
-          mkdir -p templates_out
-          REL="$(find ./bin -maxdepth 1 -type f -name 'godot.windows.template_release.x86_64*.exe' ! -name '*.console.exe' | sort | head -n1)"
-          DBG="$(find ./bin -maxdepth 1 -type f -name 'godot.windows.template_debug.x86_64*.exe' ! -name '*.console.exe' | sort | head -n1)"
-          test -n "$REL" && test -n "$DBG"
-          cp "$REL" templates_out/windows_release_x86_64.exe
-          cp "$DBG" templates_out/windows_debug_x86_64.exe
-          ls -lh templates_out/
-
-      - name: Upload templates
-        uses: actions/upload-artifact@v7
-        with:
-          name: templates-windows-x86_64
-          path: templates_out/
-          if-no-files-found: error
-
-  linux-templates:
-    name: Linux Export Templates
-    needs: [version, linux-build]
+  publish-release:
+    name: Publish GitHub Release
+    needs: [prepare, build, deploy-pages]
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    permissions:
+      contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - name: Setup Python and SCons
-        uses: ./.github/actions/godot-deps
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libwayland-bin \
-            libx11-dev libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev \
-            libwayland-dev libgl1-mesa-dev libglu1-mesa-dev libasound2-dev \
-            libpulse-dev libudev-dev libxkbcommon-dev
-
-      - name: Download C# glue
+      - name: Download release artifacts
         uses: actions/download-artifact@v6
         with:
-          name: mono-glue
-          path: modules/mono/glue/
-
-      - name: Setup arrangement_2d Conan dependencies
-        uses: ./.github/actions/arrangement-conan
-        with:
-          arch: x86_64
-
-      - name: Restore SCons cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ env.SCONS_CACHE }}
-          key: scons-linux-templates|${{ github.event.repository.default_branch }}|${{ github.sha }}
-          restore-keys: |
-            scons-linux-templates|${{ github.event.repository.default_branch }}|
-
-      - name: Build export templates
-        shell: bash
-        env:
-          BUILD_NAME: ciallo
-          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
-        run: |
-          for TARGET in template_release template_debug; do
-            scons platform=linuxbsd target=$TARGET arch=x86_64 \
-              debug_symbols=no \
-              disable_physics_3d=yes disable_navigation_3d=yes \
-              "cache_path=${SCONS_CACHE}" \
-              redirect_build_objects=no
-          done
-          ls -l bin/
-
-      - name: Save SCons cache
-        if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: ${{ env.SCONS_CACHE }}
-          key: scons-linux-templates|${{ github.event.repository.default_branch }}|${{ github.sha }}
-
-      - name: Collect templates with export filenames
-        shell: bash
-        run: |
-          mkdir -p templates_out
-          REL="$(find ./bin -maxdepth 1 -type f -name 'godot.linuxbsd.template_release.x86_64*' ! -name '*.so' | sort | head -n1)"
-          DBG="$(find ./bin -maxdepth 1 -type f -name 'godot.linuxbsd.template_debug.x86_64*' ! -name '*.so' | sort | head -n1)"
-          test -n "$REL" && test -n "$DBG"
-          strip "$REL" "$DBG" 2>/dev/null || true
-          cp "$REL" templates_out/linux_release.x86_64
-          cp "$DBG" templates_out/linux_debug.x86_64
-          chmod +x templates_out/linux_release.x86_64 templates_out/linux_debug.x86_64
-          ls -lh templates_out/
-
-      - name: Upload templates
-        uses: actions/upload-artifact@v7
-        with:
-          name: templates-linux-x86_64
-          path: templates_out/
-          if-no-files-found: error
-
-  macos-templates:
-    name: macOS Export Templates
-    needs: [version, linux-build]
-    runs-on: macos-26
-    timeout-minutes: 180
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - name: Select Xcode 26
-        run: sudo xcode-select -s /Applications/Xcode_26.0.1.app
-
-      - name: Setup Python and SCons
-        uses: ./.github/actions/godot-deps
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Download C# glue
-        uses: actions/download-artifact@v6
-        with:
-          name: mono-glue
-          path: modules/mono/glue/
-
-      - name: Setup arrangement_2d Conan dependencies
-        uses: ./.github/actions/arrangement-conan
-        with:
-          arch: armv8
-
-      - name: Setup Vulkan SDK
-        id: vulkan-sdk
-        shell: bash
-        run: |
-          if sh misc/scripts/install_vulkan_sdk_macos.sh; then
-            echo "enabled=yes" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::macOS Vulkan SDK installation failed; building without Vulkan support."
-            echo "enabled=no" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Restore SCons cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ env.SCONS_CACHE }}
-          key: scons-macos-templates|${{ github.event.repository.default_branch }}|${{ github.sha }}
-          restore-keys: |
-            scons-macos-templates|${{ github.event.repository.default_branch }}|
-
-      - name: Build export templates
-        shell: bash
-        env:
-          BUILD_NAME: ciallo
-          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
-        run: |
-          for TARGET in template_release template_debug; do
-            scons platform=macos target=$TARGET arch=arm64 \
-              vulkan=${{ steps.vulkan-sdk.outputs.enabled }} \
-              debug_symbols=no \
-              disable_physics_3d=yes disable_navigation_3d=yes \
-              "cache_path=${SCONS_CACHE}" \
-              redirect_build_objects=no
-          done
-          ls -l bin/
-
-      - name: Assemble macos.zip bundle
-        shell: bash
-        env:
-          BUILD_NAME: ciallo
-          GODOT_VERSION_STATUS: ${{ needs.version.outputs.status }}
-        run: |
-          # generate_bundle lipos the release+debug binaries into macos_template.app
-          # and zips it to bin/godot_macos*.zip (see platform/macos/platform_macos_builders.py).
-          scons platform=macos target=template_release arch=arm64 \
-            vulkan=${{ steps.vulkan-sdk.outputs.enabled }} \
-            debug_symbols=no \
-            disable_physics_3d=yes disable_navigation_3d=yes \
-            generate_bundle=yes \
-            "cache_path=${SCONS_CACHE}" \
-            redirect_build_objects=no
-          mkdir -p templates_out
-          BUNDLE="$(find ./bin -maxdepth 1 -type f -name 'godot_macos*.zip' | sort | head -n1)"
-          test -n "$BUNDLE"
-          cp "$BUNDLE" templates_out/macos.zip
-          ls -lh templates_out/
-
-      - name: Save SCons cache
-        if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: ${{ env.SCONS_CACHE }}
-          key: scons-macos-templates|${{ github.event.repository.default_branch }}|${{ github.sha }}
-
-      - name: Upload templates
-        uses: actions/upload-artifact@v7
-        with:
-          name: templates-macos
-          path: templates_out/
-          if-no-files-found: error
-
-  package-templates:
-    name: Package export templates (.tpz)
-    needs: [version, windows-templates, linux-templates, macos-templates]
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Download all template artifacts
-        uses: actions/download-artifact@v6
-        with:
-          pattern: templates-*
-          path: dl/
+          pattern: godot-*
+          path: packages
           merge-multiple: true
 
-      - name: Assemble .tpz
-        id: tpz
-        shell: bash
-        run: |
-          # The editor extracts the .tpz into a version directory derived from
-          # version.txt, which must equal GODOT_VERSION_FULL_CONFIG:
-          #   <major>.<minor>.<patch>.<status>.mono
-          VER="$(python -c 'import version; print(f"{version.major}.{version.minor}.{version.patch}")')"
-          FULL="${VER}.${{ needs.version.outputs.status }}.mono"
-
-          mkdir -p templates
-          cp dl/windows_release_x86_64.exe templates/
-          cp dl/windows_debug_x86_64.exe   templates/
-          cp dl/linux_release.x86_64       templates/
-          cp dl/linux_debug.x86_64         templates/
-          cp dl/macos.zip                  templates/
-          echo "$FULL" > templates/version.txt
-          cat templates/version.txt
-          ls -lh templates/
-
-          TPZ="godot-export-templates-${{ needs.version.outputs.status }}.tpz"
-          # .tpz is a plain zip whose files live under the version.txt base dir.
-          zip -r "$TPZ" templates >/dev/null
-          echo "tpz=${TPZ}" >> "$GITHUB_OUTPUT"
-          ls -lh "$TPZ"
-
-      - name: Upload .tpz artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: godot-export-templates-${{ needs.version.outputs.status }}
-          path: ${{ steps.tpz.outputs.tpz }}
-
-      - name: Publish to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: ${{ steps.tpz.outputs.tpz }}
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          files: |
+            packages/*.zip
+            packages/*.tpz
           fail_on_unmatched_files: true

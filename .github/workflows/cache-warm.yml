@@ -1,0 +1,57 @@
+name: Ciallo Godot Cache Warm
+
+on:
+  schedule:
+    - cron: "17 3 */1 * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ciallo-godot-cache-warm
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Resolve ciallo source
+    runs-on: ubuntu-22.04
+    outputs:
+      ref: ${{ steps.source.outputs.ref }}
+      sha: ${{ steps.source.outputs.sha }}
+      status: ${{ steps.source.outputs.status }}
+    steps:
+      - name: Checkout ciallo
+        uses: actions/checkout@v5
+        with:
+          ref: ciallo
+          fetch-depth: 0
+
+      - name: Resolve source
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch origin +refs/heads/ciallo:refs/remotes/origin/ciallo
+          git checkout --detach origin/ciallo
+          head_sha="$(git rev-parse HEAD)"
+          version_status="ciallo.g$(git rev-parse --short=9 HEAD)"
+
+          {
+            echo "ref=$head_sha"
+            echo "sha=$head_sha"
+            echo "status=$version_status"
+          } >> "$GITHUB_OUTPUT"
+          echo "Warming caches for origin/ciallo@$head_sha with status '$version_status'."
+
+  build:
+    name: Warm build caches
+    needs: prepare
+    permissions:
+      contents: read
+    uses: ./.github/workflows/_build.yml
+    with:
+      source_ref: ${{ needs.prepare.outputs.ref }}
+      source_sha: ${{ needs.prepare.outputs.sha }}
+      version_status: ${{ needs.prepare.outputs.status }}
+      produce_artifacts: false
