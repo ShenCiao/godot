@@ -651,7 +651,7 @@ void Window::_make_window() {
 
 	DisplayServer::VSyncMode vsync_mode = DisplayServer::get_singleton()->window_get_vsync_mode(DisplayServer::MAIN_WINDOW_ID);
 	Rect2i window_rect;
-	if (initial_position == WINDOW_INITIAL_POSITION_ABSOLUTE) {
+	if (initial_position_applied || initial_position == WINDOW_INITIAL_POSITION_ABSOLUTE) {
 		window_rect = Rect2i(position, size);
 	} else if (initial_position == WINDOW_INITIAL_POSITION_CENTER_PRIMARY_SCREEN) {
 		window_rect = Rect2i(DisplayServer::get_singleton()->screen_get_position(DisplayServer::SCREEN_PRIMARY) + (DisplayServer::get_singleton()->screen_get_size(DisplayServer::SCREEN_PRIMARY) - size) / 2, size);
@@ -664,9 +664,11 @@ void Window::_make_window() {
 	} else if (initial_position == WINDOW_INITIAL_POSITION_CENTER_SCREEN_WITH_KEYBOARD_FOCUS) {
 		window_rect = Rect2i(DisplayServer::get_singleton()->screen_get_position(DisplayServer::SCREEN_WITH_KEYBOARD_FOCUS) + (DisplayServer::get_singleton()->screen_get_size(DisplayServer::SCREEN_WITH_KEYBOARD_FOCUS) - size) / 2, size);
 	}
+	position = window_rect.position;
 
 	window_id = DisplayServer::get_singleton()->create_sub_window(DisplayServer::WindowMode(mode), vsync_mode, f, window_rect, is_in_edited_scene_root() ? false : exclusive, transient_parent ? transient_parent->window_id : DisplayServer::INVALID_WINDOW_ID);
 	ERR_FAIL_COND(window_id == DisplayServer::INVALID_WINDOW_ID);
+	initial_position_applied = true;
 	DisplayServer::get_singleton()->window_set_max_size(Size2i(), window_id);
 	DisplayServer::get_singleton()->window_set_min_size(Size2i(), window_id);
 	DisplayServer::get_singleton()->window_set_mouse_passthrough(mpath, window_id);
@@ -970,13 +972,16 @@ void Window::set_visible(bool p_visible) {
 	} else {
 		if (visible) {
 			embedder = embedder_vp;
-			if (initial_position != WINDOW_INITIAL_POSITION_ABSOLUTE) {
-				if (is_in_edited_scene_root()) {
-					Size2 screen_size = Size2(GLOBAL_GET_CACHED(real_t, "display/window/size/viewport_width"), GLOBAL_GET_CACHED(real_t, "display/window/size/viewport_height"));
-					position = (screen_size - size) / 2;
-				} else {
-					position = (embedder->get_visible_rect().size - size) / 2;
+			if (!initial_position_applied) {
+				if (initial_position != WINDOW_INITIAL_POSITION_ABSOLUTE) {
+					if (is_in_edited_scene_root()) {
+						Size2 screen_size = Size2(GLOBAL_GET_CACHED(real_t, "display/window/size/viewport_width"), GLOBAL_GET_CACHED(real_t, "display/window/size/viewport_height"));
+						position = (screen_size - size) / 2;
+					} else {
+						position = (embedder->get_visible_rect().size - size) / 2;
+					}
 				}
+				initial_position_applied = true;
 			}
 			embedder->_sub_window_register(this);
 			RS::get_singleton()->viewport_set_update_mode(get_viewport_rid(), RS::VIEWPORT_UPDATE_WHEN_PARENT_VISIBLE);
@@ -1552,13 +1557,16 @@ void Window::_notification(int p_what) {
 			if (embedded) {
 				// Create as embedded.
 				if (embedder) {
-					if (initial_position != WINDOW_INITIAL_POSITION_ABSOLUTE) {
-						if (is_in_edited_scene_root()) {
-							Size2 screen_size = Size2(GLOBAL_GET_CACHED(real_t, "display/window/size/viewport_width"), GLOBAL_GET_CACHED(real_t, "display/window/size/viewport_height"));
-							position = (screen_size - size) / 2;
-						} else {
-							position = (embedder->get_visible_rect().size - size) / 2;
+					if (!initial_position_applied) {
+						if (initial_position != WINDOW_INITIAL_POSITION_ABSOLUTE) {
+							if (is_in_edited_scene_root()) {
+								Size2 screen_size = Size2(GLOBAL_GET_CACHED(real_t, "display/window/size/viewport_width"), GLOBAL_GET_CACHED(real_t, "display/window/size/viewport_height"));
+								position = (screen_size - size) / 2;
+							} else {
+								position = (embedder->get_visible_rect().size - size) / 2;
+							}
 						}
+						initial_position_applied = true;
 					}
 					embedder->_sub_window_register(this);
 					RS::get_singleton()->viewport_set_update_mode(get_viewport_rid(), RS::VIEWPORT_UPDATE_WHEN_PARENT_VISIBLE);
@@ -2116,6 +2124,7 @@ void Window::_popup_base(const Rect2i &p_screen_rect) {
 	bool should_fit = is_embedded() || !DisplayServer::get_singleton()->has_feature(DisplayServer::FEATURE_SELF_FITTING_WINDOWS);
 
 	if (p_screen_rect != Rect2i()) {
+		initial_position_applied = true;
 		set_position(p_screen_rect.position);
 
 		if (should_fit) {
@@ -2155,7 +2164,7 @@ void Window::_popup_base(const Rect2i &p_screen_rect) {
 	}
 	if (should_fit && parent_rect != Rect2i() && !parent_rect.intersects(Rect2i(position, size))) {
 		ERR_PRINT(vformat("Window %d spawned at invalid position: %s.", get_window_id(), position));
-		set_position((parent_rect.size - size) / 2);
+		set_position(parent_rect.position + (parent_rect.size - size) / 2);
 	}
 	if (parent_rect != Rect2i() && is_clamped_to_embedder() && is_embedded()) {
 		Rect2i new_rect = fit_rect_in_parent(Rect2i(position, size), parent_rect);

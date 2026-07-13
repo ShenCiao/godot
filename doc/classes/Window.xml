@@ -375,7 +375,8 @@
 			<return type="void" />
 			<param index="0" name="rect" type="Rect2i" default="Rect2i(0, 0, 0, 0)" />
 			<description>
-				Shows the [Window] and makes it transient (see [member transient]). If [param rect] is provided, it will be set as the [Window]'s size. Fails if called on the main window.
+				Shows the [Window] and makes it transient (see [member transient]). If [param rect] is provided, it will be set as the [Window]'s position and size, and will take precedence over [member initial_position]. Fails if called on the main window.
+				If [param rect] is not provided, [member initial_position] is used the first time the window is shown. After that, the current window position and size are used.
 				If [member ProjectSettings.display/window/subwindows/embed_subwindows] is [code]true[/code] (single-window mode), [param rect]'s coordinates are global and relative to the main window's top-left corner (excluding window decorations). If [param rect]'s position coordinates are negative, the window will be located outside the main window and may not be visible as a result.
 				If [member ProjectSettings.display/window/subwindows/embed_subwindows] is [code]false[/code] (multi-window mode), [param rect]'s coordinates are global and relative to the top-left corner of the leftmost screen. If [param rect]'s position coordinates are negative, the window will be placed at the top-left corner of the screen.
 				[b]Note:[/b] [param rect] must be in global coordinates if specified.
@@ -631,7 +632,7 @@
 			If [code]true[/code], native window will be used regardless of parent viewport and project settings.
 		</member>
 		<member name="initial_position" type="int" setter="set_initial_position" getter="get_initial_position" enum="Window.WindowInitialPosition" default="0">
-			Specifies the initial type of position for the [Window].
+			Specifies how the [Window] is positioned the first time it is shown. Once shown, later position changes are preserved when the same [Window] instance is hidden and shown again. A non-empty rectangle passed to a popup method takes precedence over this property.
 		</member>
 		<member name="keep_title_visible" type="bool" setter="set_keep_title_visible" getter="get_keep_title_visible" default="false">
 			If [code]true[/code], the [Window] width is expanded to keep the title bar text fully visible.
@@ -705,7 +706,7 @@
 		<member name="position" type="Vector2i" setter="set_position" getter="get_position" default="Vector2i(0, 0)">
 			The window's position in pixels.
 			If [member ProjectSettings.display/window/subwindows/embed_subwindows] is [code]false[/code], the position is in absolute screen coordinates. This typically applies to editor plugins. If the setting is [code]true[/code], the window's position is in the coordinates of its parent [Viewport].
-			[b]Note:[/b] This property only works if [member initial_position] is set to [constant WINDOW_INITIAL_POSITION_ABSOLUTE].
+			[b]Note:[/b] The initial value of this property is used for initial placement only if [member initial_position] is set to [constant WINDOW_INITIAL_POSITION_ABSOLUTE]. After the [Window] has been shown, this property can be changed regardless of [member initial_position].
 		</member>
 		<member name="sharp_corners" type="bool" setter="set_flag" getter="get_flag" default="false">
 			If [code]true[/code], the [Window] will override the OS window style to display sharp corners.

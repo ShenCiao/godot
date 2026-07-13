@@ -46,6 +46,14 @@ private:
 	CursorShape cursor_shape = CursorShape::CURSOR_ARROW;
 	bool window_over = false;
 	Callable event_callback;
+	Callable sub_window_event_callback;
+	Callable rect_changed_callback;
+
+	bool window_geometry_enabled = false;
+	Vector<Rect2i> screen_rects;
+	int main_window_screen = 0;
+	Rect2i sub_window_rect;
+	Rect2i last_created_sub_window_rect;
 
 	String clipboard_text;
 	String primary_clipboard_text;
@@ -78,14 +86,41 @@ private:
 		_send_window_event(p_over ? WINDOW_EVENT_MOUSE_ENTER : WINDOW_EVENT_MOUSE_EXIT);
 	}
 
-	void _send_window_event(WindowEvent p_event) {
-		if (event_callback.is_valid()) {
+	void _send_window_event(WindowEvent p_event, WindowID p_window = MAIN_WINDOW_ID) {
+		const Callable &callback = p_window == MAIN_WINDOW_ID ? event_callback : sub_window_event_callback;
+		if (callback.is_valid()) {
 			Variant event = int(p_event);
-			event_callback.call(event);
+			callback.call(event);
 		}
 	}
 
 public:
+	void configure_window_geometry(const Vector<Rect2i> &p_screen_rects, int p_main_window_screen = 0) {
+		screen_rects = p_screen_rects;
+		main_window_screen = p_main_window_screen;
+		window_geometry_enabled = true;
+	}
+
+	void reset_window_geometry() {
+		window_geometry_enabled = false;
+		screen_rects.clear();
+		main_window_screen = 0;
+		sub_window_rect = Rect2i();
+		last_created_sub_window_rect = Rect2i();
+		sub_window_event_callback = Callable();
+		rect_changed_callback = Callable();
+	}
+
+	Rect2i get_last_created_sub_window_rect() const {
+		return last_created_sub_window_rect;
+	}
+
+	void simulate_window_rect_changed(const Rect2i &p_rect) {
+		sub_window_rect = p_rect;
+		Variant rect = p_rect;
+		rect_changed_callback.call(rect);
+	}
+
 	bool has_feature(Feature p_feature) const override {
 		switch (p_feature) {
 			case FEATURE_MOUSE:
@@ -126,6 +161,31 @@ public:
 
 	virtual Point2i mouse_get_position() const override { return mouse_position; }
 
+	virtual int get_screen_count() const override {
+		return window_geometry_enabled ? screen_rects.size() : DisplayServerHeadless::get_screen_count();
+	}
+
+	virtual Point2i screen_get_position(int p_screen = SCREEN_OF_MAIN_WINDOW) const override {
+		if (!window_geometry_enabled) {
+			return DisplayServerHeadless::screen_get_position(p_screen);
+		}
+		return screen_rects[_get_screen_index(p_screen)].position;
+	}
+
+	virtual Size2i screen_get_size(int p_screen = SCREEN_OF_MAIN_WINDOW) const override {
+		if (!window_geometry_enabled) {
+			return DisplayServerHeadless::screen_get_size(p_screen);
+		}
+		return screen_rects[_get_screen_index(p_screen)].size;
+	}
+
+	virtual Rect2i screen_get_usable_rect(int p_screen = SCREEN_OF_MAIN_WINDOW) const override {
+		if (!window_geometry_enabled) {
+			return DisplayServerHeadless::screen_get_usable_rect(p_screen);
+		}
+		return screen_rects[_get_screen_index(p_screen)];
+	}
+
 	virtual void clipboard_set(const String &p_text) override { clipboard_text = p_text; }
 	virtual String clipboard_get() const override { return clipboard_text; }
 	virtual void clipboard_set_primary(const String &p_text) override { primary_clipboard_text = p_text; }
@@ -135,12 +195,49 @@ public:
 		return Size2i(1920, 1080);
 	}
 
+	virtual WindowID create_sub_window(WindowMode p_mode, VSyncMode p_vsync_mode, uint32_t p_flags, const Rect2i &p_rect = Rect2i(), bool p_exclusive = false, WindowID p_transient_parent = INVALID_WINDOW_ID) override {
+		if (!window_geometry_enabled) {
+			return DisplayServerHeadless::create_sub_window(p_mode, p_vsync_mode, p_flags, p_rect, p_exclusive, p_transient_parent);
+		}
+		sub_window_rect = p_rect;
+		last_created_sub_window_rect = p_rect;
+		return MAIN_WINDOW_ID + 1;
+	}
+
+	virtual void delete_sub_window(WindowID p_id) override {
+		if (!window_geometry_enabled) {
+			DisplayServerHeadless::delete_sub_window(p_id);
+			return;
+		}
+		sub_window_event_callback = Callable();
+		rect_changed_callback = Callable();
+	}
+
+	virtual int window_get_current_screen(WindowID p_window = MAIN_WINDOW_ID) const override {
+		if (!window_geometry_enabled) {
+			return DisplayServerHeadless::window_get_current_screen(p_window);
+		}
+		return p_window == MAIN_WINDOW_ID ? main_window_screen : get_screen_from_rect(sub_window_rect);
+	}
+
+	virtual void window_set_rect_changed_callback(const Callable &p_callable, WindowID p_window = MAIN_WINDOW_ID) override {
+		if (!window_geometry_enabled) {
+			DisplayServerHeadless::window_set_rect_changed_callback(p_callable, p_window);
+			return;
+		}
+		rect_changed_callback = p_callable;
+	}
+
 	virtual void cursor_set_shape(CursorShape p_shape) override {
 		cursor_shape = p_shape;
 	}
 
 	virtual void window_set_window_event_callback(const Callable &p_callable, WindowID p_window = MAIN_WINDOW_ID) override {
-		event_callback = p_callable;
+		if (p_window == MAIN_WINDOW_ID) {
+			event_callback = p_callable;
+		} else {
+			sub_window_event_callback = p_callable;
+		}
 	}
 
 	static void register_mock_driver() {

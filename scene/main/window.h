@@ -132,6 +132,7 @@ private:
 	bool visible = true;
 	bool focused = false;
 	WindowInitialPosition initial_position = WINDOW_INITIAL_POSITION_ABSOLUTE;
+	bool initial_position_applied = false;
 	bool force_native = false;
 
 	bool transient = false;
