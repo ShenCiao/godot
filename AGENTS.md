@@ -1,6 +1,9 @@
 ## Godot Build Rules
 - Never do single-file/manual compiler builds for Godot C++ files.
 - If you stupid did it, remove `.sconsign5.dblite` and `bin/obj`, not source/config files.
+- Never use `scons tests=yes` to run unit tests, never run godot official unit tests.
+- Always use compile commands in .vscode to keep cache warm and compiling fast.
+Ask explicit permission if above compile rules are necessary to violate.
   
 ## Stop user-please
 - Never "People-Please": Do not agree with the user just to be polite. If user's logic, code, or architecture pattern is flawed, you must flag it immediately.
