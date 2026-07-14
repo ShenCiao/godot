@@ -239,7 +239,8 @@ def build_godot_api(msbuild_tool, module_dir, output_dir, push_nupkgs_local, pre
             os.makedirs(editor_api_dir)
 
         def copy_target(target_path):
-            from shutil import copy
+            from filecmp import cmp
+            from shutil import copy2
 
             filename = os.path.basename(target_path)
 
@@ -249,13 +250,28 @@ def build_godot_api(msbuild_tool, module_dir, output_dir, push_nupkgs_local, pre
             if not os.path.isfile(src_path):
                 src_path = os.path.join(plugins_src_dir, filename)
 
+            if os.path.isfile(target_path) and cmp(src_path, target_path, shallow=False):
+                return
+
             print(f"Copying assembly to {target_path}...")
-            copy(src_path, target_path)
+            copy2(src_path, target_path)
 
         for scons_target in targets:
             copy_target(scons_target)
 
     return 0
+
+
+def write_text_if_changed(path, content):
+    try:
+        with open(path, encoding="utf-8") as f:
+            if f.read() == content:
+                return
+    except FileNotFoundError:
+        pass
+
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(content)
 
 
 def generate_sdk_package_versions():
@@ -317,8 +333,7 @@ def generate_sdk_package_versions():
 """.format(version_str, ";".join(version_defines))
 
     # We write in ../SdkPackageVersions.props.
-    with open(os.path.join(dirname(script_path), "SdkPackageVersions.props"), "w", encoding="utf-8", newline="\n") as f:
-        f.write(props)
+    write_text_if_changed(os.path.join(dirname(script_path), "SdkPackageVersions.props"), props)
 
     # Also write the versioned docs URL to a constant for the Source Generators.
 
@@ -342,8 +357,7 @@ def generate_sdk_package_versions():
     )
     os.makedirs(generators_dir, exist_ok=True)
 
-    with open(os.path.join(generators_dir, "Common.Constants.cs"), "w", encoding="utf-8", newline="\n") as f:
-        f.write(constants)
+    write_text_if_changed(os.path.join(generators_dir, "Common.Constants.cs"), constants)
 
 
 def build_all(
