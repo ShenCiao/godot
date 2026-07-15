@@ -3619,17 +3619,10 @@ Error BindingsGenerator::_generate_cs_native_calls(const InternalCall &p_icall, 
 }
 
 Error BindingsGenerator::_save_file(const String &p_path, const StringBuilder &p_content) {
-	String content = p_content.as_string();
-	Error read_error;
-	String existing_content = FileAccess::get_file_as_string(p_path, &read_error);
-	if (read_error == OK && existing_content == content) {
-		return OK;
-	}
-
 	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::WRITE);
 	ERR_FAIL_COND_V_MSG(file.is_null(), ERR_FILE_CANT_WRITE, "Cannot open file: '" + p_path + "'.");
 
-	file->store_string(content);
+	file->store_string(p_content.as_string());
 
 	return OK;
 }
