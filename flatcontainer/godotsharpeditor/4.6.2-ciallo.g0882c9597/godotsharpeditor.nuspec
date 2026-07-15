@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>GodotSharpEditor</id>
+    <version>4.6.2-ciallo.g0882c9597</version>
+    <authors>Godot Engine contributors</authors>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <projectUrl>https://github.com/godotengine/godot/tree/master/modules/mono/glue/GodotSharp/GodotSharpEditor</projectUrl>
+    <description>Godot C# Editor API.</description>
+    <copyright>Copyright (c) Godot Engine contributors</copyright>
+    <repository type="git" url="https://github.com/godotengine/godot/tree/master/modules/mono/glue/GodotSharp/GodotSharpEditor" commit="0882c9597831c31fd0e22581c266e1d34255bc88" />
+    <dependencies>
+      <group targetFramework="net8.0">
+        <dependency id="GodotSharp" version="4.6.2-ciallo.g0882c9597" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+  </metadata>
+</package>
