@@ -12,6 +12,8 @@ namespace GodotTools.ProjectEditor
     {
         public static string GodotSdkAttrValue => $"Godot.NET.Sdk/{GeneratedGodotNupkgsVersions.GodotNETSdk}";
 
+        public const string GodotLocalDevelopmentPropsPath = "$(GodotProjectDir).godot/mono/local_sdk.props";
+
         public static string GodotMinimumRequiredTfm => "net8.0";
 
         public static ProjectRootElement GenGameProject(string name)
@@ -37,6 +39,9 @@ namespace GodotTools.ProjectEditor
             // If the name is not a valid namespace, manually set RootNamespace to a sanitized one.
             if (sanitizedName != name)
                 mainGroup.AddProperty("RootNamespace", sanitizedName);
+
+            var localDevelopmentImport = root.AddImport(GodotLocalDevelopmentPropsPath);
+            localDevelopmentImport.Condition = $"Exists('{GodotLocalDevelopmentPropsPath}')";
 
             return root;
         }

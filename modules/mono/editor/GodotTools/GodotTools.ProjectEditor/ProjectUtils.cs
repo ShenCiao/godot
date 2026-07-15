@@ -96,7 +96,7 @@ namespace GodotTools.ProjectEditor
             // We only fill in the SDK when it is missing or malformed (e.g. a freshly
             // generated project, or a manual edit that dropped the version). Keeping an
             // existing valid reference untouched means self builds never overwrite the
-            // .csproj; version validation is left to the release CI, not the editor.
+            // .csproj. Updating the pin is an explicit action in the editor's C# menu.
             string sdk = root.Sdk?.Trim() ?? string.Empty;
             if (IsValidGodotSdkReference(sdk))
                 return;
@@ -116,6 +116,27 @@ namespace GodotTools.ProjectEditor
             string version = sdk.Substring(prefix.Length).Trim();
             return version.Length > 0;
         }
+
+        public static string GetGodotSdkReference(MSBuildProject project)
+            => project.Root.Sdk?.Trim() ?? string.Empty;
+
+        public static bool SetGodotSdkReference(MSBuildProject project, string sdk)
+        {
+            sdk = sdk.Trim();
+            if (!IsValidGodotSdkReference(sdk))
+                throw new ArgumentException("Invalid Godot .NET SDK reference.", nameof(sdk));
+
+            if (string.Equals(GetGodotSdkReference(project), sdk, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            project.Root.Sdk = sdk;
+            project.HasUnsavedChanges = true;
+            return true;
+        }
+
+        public static bool HasImport(MSBuildProject project, string importedProject)
+            => project.Root.Imports.Any(import =>
+                string.Equals(import.Project, importedProject, StringComparison.OrdinalIgnoreCase));
 
         private static void EnsureTargetFrameworkMatchesMinimumRequirement(MSBuildProject project)
         {

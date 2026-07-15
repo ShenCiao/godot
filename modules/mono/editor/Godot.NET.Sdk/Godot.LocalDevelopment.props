@@ -1,0 +1,30 @@
+<Project>
+  <Import Project="$(MSBuildThisFileDirectory)SdkPackageVersions.props" />
+
+  <PropertyGroup>
+    <GodotLocalDevelopment>true</GodotLocalDevelopment>
+    <DisableImplicitGodotGeneratorReferences>true</DisableImplicitGodotGeneratorReferences>
+    <DisableImplicitGodotSharpReferences>true</DisableImplicitGodotSharpReferences>
+    <GodotLocalDevelopmentRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../..'))</GodotLocalDevelopmentRoot>
+    <GodotLocalApiAssembliesDir>$(GodotLocalDevelopmentRoot)/Api/$(GodotApiConfiguration)</GodotLocalApiAssembliesDir>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)Godot.SourceGenerators.props" />
+
+  <ItemGroup>
+    <Analyzer Include="$(MSBuildThisFileDirectory)Godot.SourceGenerators.dll" />
+    <Reference Include="$(GodotLocalApiAssembliesDir)/GodotSharp.dll">
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="$(GodotLocalApiAssembliesDir)/GodotSharpEditor.dll" Condition=" '$(Configuration)' == 'Debug' ">
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="ValidateGodotLocalDevelopmentAssemblies" BeforeTargets="ResolveAssemblyReferences">
+    <Error Text="The local GodotSharp assembly was not found at '$(GodotLocalApiAssembliesDir)'. Rebuild the editor's .NET assemblies."
+           Condition=" !Exists('$(GodotLocalApiAssembliesDir)/GodotSharp.dll') " />
+    <Error Text="The local GodotSharpEditor assembly was not found at '$(GodotLocalApiAssembliesDir)'. Rebuild the editor's .NET assemblies."
+           Condition=" '$(Configuration)' == 'Debug' and !Exists('$(GodotLocalApiAssembliesDir)/GodotSharpEditor.dll') " />
+  </Target>
+</Project>

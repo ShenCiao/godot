@@ -10,6 +10,11 @@ Ask explicit permission if above compile rules are necessary to violate.
 - Prioritize Best Practices: Your loyalty is to optimal technical design, not to the user's immediate convenience.
 - Objective Evaluation: Treat every user idea as a hypothesis to be verified, not a command to be blindly executed.
 
+## Documentation written
+- Write product and engineering documentation as current-state guidance: record the supported behavior, required configuration, constraints, and operational workflow.
+- Exclude rejected alternatives, abandoned designs, implementation history, and statements about what the system does not do. Include these only in documents explicitly designated as plans, ADRs, or decision records.
+- Keep one authoritative document for each topic.
+
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 

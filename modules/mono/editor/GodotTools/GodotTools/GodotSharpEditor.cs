@@ -42,7 +42,9 @@ namespace GodotTools
         private PopupMenu _menuPopup;
 
         private AcceptDialog _errorDialog;
+        private AcceptDialog _sdkMismatchDialog;
         private ConfirmationDialog _confirmCreateSlnDialog;
+        private ConfirmationDialog _confirmSyncSdkDialog;
 
         private Button _bottomPanelBtn;
         private Button _toolBarBuildButton;
@@ -138,6 +140,11 @@ namespace GodotTools
                     }
                     break;
                 }
+                case MenuOptions.SyncSdkVersion:
+                {
+                    ShowConfirmSyncSdkDialog();
+                    break;
+                }
                 default:
                     throw new ArgumentOutOfRangeException(nameof(id), id, "Invalid menu option");
             }
@@ -157,6 +164,7 @@ namespace GodotTools
         private enum MenuOptions
         {
             CreateSln,
+            SyncSdkVersion,
         }
 
         public void ShowErrorDialog(string message, string title = "Error")
@@ -171,6 +179,98 @@ namespace GodotTools
             _confirmCreateSlnDialog.Title = "Create C# solution".TTR();
             _confirmCreateSlnDialog.DialogText = "C# solution already exists. This will override the existing C# project file, any manual changes will be lost.".TTR();
             EditorInterface.Singleton.PopupDialogCentered(_confirmCreateSlnDialog);
+        }
+
+        private void ShowConfirmSyncSdkDialog()
+        {
+            if (!File.Exists(GodotSharpDirs.ProjectCsProjPath))
+            {
+                ShowErrorDialog("Create the C# project before synchronizing its SDK version.", "C# Project SDK");
+                return;
+            }
+
+            try
+            {
+                var project = ProjectUtils.Open(GodotSharpDirs.ProjectCsProjPath)
+                              ?? throw new InvalidOperationException("Cannot open C# project.");
+                string currentSdk = ProjectUtils.GetGodotSdkReference(project);
+                string editorSdk = ProjectGenerator.GodotSdkAttrValue;
+
+                if (string.Equals(currentSdk, editorSdk, StringComparison.OrdinalIgnoreCase))
+                {
+                    ShowErrorDialog($"The C# project already uses '{editorSdk}'.", "C# Project SDK");
+                    return;
+                }
+
+                _confirmSyncSdkDialog.DialogText =
+                    $"Change the C# project SDK from '{currentSdk}' to '{editorSdk}'?\n\n" +
+                    "This modifies the tracked .csproj file. Publish the matching SDK package before committing the change.";
+                EditorInterface.Singleton.PopupDialogCentered(_confirmSyncSdkDialog);
+            }
+            catch (Exception e)
+            {
+                ShowErrorDialog(e.ToString(), "C# Project SDK");
+            }
+        }
+
+        private void SyncSdkVersion()
+        {
+            try
+            {
+                var project = ProjectUtils.Open(GodotSharpDirs.ProjectCsProjPath)
+                              ?? throw new InvalidOperationException("Cannot open C# project.");
+
+                if (!ProjectUtils.SetGodotSdkReference(project, ProjectGenerator.GodotSdkAttrValue))
+                    return;
+
+                FileUtils.SaveBackupCopy(GodotSharpDirs.ProjectCsProjPath);
+                project.Save();
+                ShowErrorDialog($"The C# project now uses '{ProjectGenerator.GodotSdkAttrValue}'.", "C# Project SDK");
+            }
+            catch (Exception e)
+            {
+                ShowErrorDialog(e.ToString(), "C# Project SDK");
+            }
+        }
+
+        private void ShowSdkVersionMismatchIfNeeded()
+        {
+            if (!File.Exists(GodotSharpDirs.ProjectCsProjPath))
+                return;
+
+            try
+            {
+                var project = ProjectUtils.Open(GodotSharpDirs.ProjectCsProjPath)
+                              ?? throw new InvalidOperationException("Cannot open C# project.");
+                string projectSdk = ProjectUtils.GetGodotSdkReference(project);
+                string editorSdk = ProjectGenerator.GodotSdkAttrValue;
+
+                if (LocalDevelopment.IsActive)
+                {
+                    if (ProjectUtils.HasImport(project, ProjectGenerator.GodotLocalDevelopmentPropsPath))
+                        return;
+
+                    _sdkMismatchDialog.Title = "Local C# Development Not Enabled".TTR();
+                    _sdkMismatchDialog.DialogText =
+                        "This local editor generated '.godot/mono/local_sdk.props', but the C# project does not import it.\n\n" +
+                        $"Add a conditional import for '{ProjectGenerator.GodotLocalDevelopmentPropsPath}' to the tracked .csproj file.";
+                    EditorInterface.Singleton.PopupDialogCentered(_sdkMismatchDialog);
+                    return;
+                }
+
+                if (string.Equals(projectSdk, editorSdk, StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                _sdkMismatchDialog.Title = "C# Project SDK Mismatch".TTR();
+                _sdkMismatchDialog.DialogText =
+                    $"This project uses '{projectSdk}', but this editor was built for '{editorSdk}'.\n\n" +
+                    "The project file was not changed. Use C# > Sync C# project SDK version only when you intend to update the dependency.";
+                EditorInterface.Singleton.PopupDialogCentered(_sdkMismatchDialog);
+            }
+            catch (Exception e)
+            {
+                GD.PushError(e.ToString());
+            }
         }
 
         private static string _vsCodePath = string.Empty;
@@ -466,6 +566,8 @@ namespace GodotTools
                 throw new InvalidOperationException();
             Instance = this;
 
+            LocalDevelopment.Synchronize();
+
             var dotNetSdkSearchVersion = Environment.Version;
 
             // First we try to find the .NET Sdk ourselves to make sure we get the
@@ -500,9 +602,22 @@ namespace GodotTools
             _errorDialog = new AcceptDialog();
             _errorDialog.SetUnparentWhenInvisible(true);
 
+            _sdkMismatchDialog = new AcceptDialog
+            {
+                Title = "C# Project SDK Mismatch".TTR(),
+            };
+            _sdkMismatchDialog.SetUnparentWhenInvisible(true);
+
             _confirmCreateSlnDialog = new ConfirmationDialog();
             _confirmCreateSlnDialog.SetUnparentWhenInvisible(true);
             _confirmCreateSlnDialog.Confirmed += () => CreateProjectSolution();
+
+            _confirmSyncSdkDialog = new ConfirmationDialog
+            {
+                Title = "Sync C# Project SDK Version".TTR(),
+            };
+            _confirmSyncSdkDialog.SetUnparentWhenInvisible(true);
+            _confirmSyncSdkDialog.Confirmed += SyncSdkVersion;
 
             MSBuildPanel = new MSBuildPanel();
             AddDock(MSBuildPanel);
@@ -536,6 +651,7 @@ namespace GodotTools
             if (File.Exists(GodotSharpDirs.ProjectCsProjPath))
             {
                 ApplyNecessaryChangesToSolution();
+                ShowSdkVersionMismatchIfNeeded();
             }
             else
             {
@@ -543,6 +659,7 @@ namespace GodotTools
                 _toolBarBuildButton.Hide();
             }
             _menuPopup.AddItem("Create C# solution".TTR(), (int)MenuOptions.CreateSln);
+            _menuPopup.AddItem("Sync C# project SDK version...".TTR(), (int)MenuOptions.SyncSdkVersion);
 
             _menuPopup.IdPressed += _MenuOptionPressed;
 
@@ -655,7 +772,9 @@ namespace GodotTools
         public override void _ExitTree()
         {
             _errorDialog?.QueueFree();
+            _sdkMismatchDialog?.QueueFree();
             _confirmCreateSlnDialog?.QueueFree();
+            _confirmSyncSdkDialog?.QueueFree();
         }
 
         private void OnSettingsChanged()

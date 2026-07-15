@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import os.path
 import shlex
+import shutil
 import subprocess
 from dataclasses import dataclass
 
@@ -258,7 +259,7 @@ def build_godot_api(msbuild_tool, module_dir, output_dir, push_nupkgs_local, pre
     return 0
 
 
-def generate_sdk_package_versions():
+def generate_sdk_package_versions(version_status_override=None):
     # I can't believe importing files in Python is so convoluted when not
     # following the golden standard for packages/modules.
     import os
@@ -274,6 +275,9 @@ def generate_sdk_package_versions():
 
     version_info = get_version_info("")
     sys.path.remove(root_path)
+
+    if version_status_override:
+        version_info["status"] = version_status_override
 
     version_str = "{major}.{minor}.{patch}".format(**version_info)
     version_status = version_info["status"]
@@ -346,11 +350,66 @@ def generate_sdk_package_versions():
         f.write(constants)
 
 
+def update_local_development_files(module_dir, output_dir, enabled):
+    target_dir = os.path.join(output_dir, "GodotSharp", "Tools", "LocalDevelopment")
+
+    if os.path.isdir(target_dir):
+        shutil.rmtree(target_dir)
+
+    if not enabled:
+        return
+
+    source_generators_dir = os.path.join(
+        module_dir,
+        "editor",
+        "Godot.NET.Sdk",
+        "Godot.SourceGenerators",
+    )
+    source_paths = (
+        os.path.join(module_dir, "editor", "Godot.NET.Sdk", "Godot.LocalDevelopment.props"),
+        os.path.join(module_dir, "SdkPackageVersions.props"),
+        os.path.join(source_generators_dir, "Godot.SourceGenerators.props"),
+        os.path.join(
+            source_generators_dir,
+            "bin",
+            "Release",
+            "netstandard2.0",
+            "Godot.SourceGenerators.dll",
+        ),
+    )
+
+    os.makedirs(target_dir)
+    for source_path in source_paths:
+        shutil.copy2(source_path, target_dir)
+
+
+def get_local_development_version_status(module_dir, build_name):
+    repository_root = os.path.dirname(os.path.dirname(module_dir))
+    git_hash = subprocess.check_output(
+        ["git", "rev-parse", "--short=9", "HEAD"],
+        cwd=repository_root,
+        encoding="utf-8",
+    ).strip()
+    return f"{build_name}.g{git_hash}"
+
+
 def build_all(
-    msbuild_tool, module_dir, output_dir, godot_platform, dev_debug, push_nupkgs_local, precision, no_deprecated, werror
+    msbuild_tool,
+    module_dir,
+    output_dir,
+    godot_platform,
+    dev_debug,
+    push_nupkgs_local,
+    precision,
+    no_deprecated,
+    werror,
+    local_development_name,
 ):
     # Generate SdkPackageVersions.props and VersionDocsUrl constant
-    generate_sdk_package_versions()
+    local_version_status = (
+        get_local_development_version_status(module_dir, local_development_name) if local_development_name else None
+    )
+    generate_sdk_package_versions(local_version_status)
 
     # Godot API
     exit_code = build_godot_api(
@@ -385,6 +444,8 @@ def build_all(
     if exit_code != 0:
         return exit_code
 
+    update_local_development_files(module_dir, output_dir, bool(local_development_name))
+
     return 0
 
 
@@ -413,6 +474,12 @@ def main():
         help="Build GodotSharp without using deprecated features. This is required, if the engine was built with 'deprecated=no'.",
     )
     parser.add_argument("--werror", action="store_true", default=False, help="Treat compiler warnings as errors.")
+    parser.add_argument(
+        "--local-development",
+        metavar="BUILD_NAME",
+        default="",
+        help="Install local C# development files and version them as BUILD_NAME.g<git-hash>.",
+    )
 
     args = parser.parse_args()
 
@@ -439,6 +506,7 @@ def main():
         args.precision,
         args.no_deprecated,
         args.werror,
+        args.local_development,
     )
     sys.exit(exit_code)
 
