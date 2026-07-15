@@ -987,7 +987,7 @@ TypedArray<Dictionary> CenterlineVectorizer::vectorize_image(const Ref<Image> &p
 	const std::vector<uint8_t> mask = build_mask(image, params.threshold);
 	const std::vector<Stroke> strokes = skeleton_to_strokes(mask, width, height, params.despeckling, params.max_thickness);
 	const uint64_t finished = Time::get_singleton()->get_ticks_usec();
-	print_verbose(vformat("CenterlineVectorizer: image=%dx%d strokes=%d total=%.3fms", width, height, strokes.size(),
+	print_verbose(vformat("CenterlineVectorizer: image=%dx%d strokes=%d total=%.3fms", width, height, int(strokes.size()),
 			double(finished - started) / 1000.0));
 	return strokes_to_array(strokes);
 }
