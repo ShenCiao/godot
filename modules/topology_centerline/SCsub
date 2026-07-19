@@ -1,0 +1,16 @@
+#!/usr/bin/env python
+
+Import("env")
+Import("env_modules")
+
+env_topology_centerline = env_modules.Clone()
+env_topology_centerline.Prepend(CPPPATH=["#thirdparty/tahoma2d_centerline"])
+env_topology_centerline.add_source_files(env.modules_sources, "*.cpp")
+
+thirdparty_sources = [
+    "#thirdparty/tahoma2d_centerline/tcenterlineadjustments.cpp",
+    "#thirdparty/tahoma2d_centerline/tcenterlinepolygonizer.cpp",
+    "#thirdparty/tahoma2d_centerline/tcenterlineskeletonizer.cpp",
+    "#thirdparty/tahoma2d_centerline/tcenterlinetostrokes.cpp",
+]
+env_topology_centerline.add_source_files(env.modules_sources, thirdparty_sources)
