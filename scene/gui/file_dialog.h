@@ -172,7 +172,10 @@ private:
 	inline static bool default_show_hidden_files = false;
 	static inline DisplayMode default_display_mode = DISPLAY_THUMBNAILS;
 	bool show_hidden_files = false;
-	bool use_native_dialog = false;
+	bool use_native_dialog = true;
+	bool custom_dialog_enabled = false;
+	bool native_dialog_active = false;
+	uint64_t native_dialog_generation = 0;
 	bool can_create_folders = true;
 	bool customization_flags[CUSTOMIZATION_MAX]; // Initialized to true in the constructor.
 
@@ -203,6 +206,9 @@ private:
 	String root_subfolder;
 	String root_prefix;
 	String full_dir;
+	String current_file;
+	Vector<String> selected_files;
+	int selected_filter = 0;
 
 	bool is_invalidating = false;
 
@@ -297,6 +303,7 @@ private:
 	void update_filename_filter_gui();
 	void update_filters();
 	void update_customization();
+	void _build_custom_ui();
 
 	void _empty_clicked(const Vector2 &p_pos, MouseButton p_button);
 	void _item_clicked(int p_item, const Vector2 &p_pos, MouseButton p_button);
@@ -350,8 +357,8 @@ private:
 	virtual void shortcut_input(const Ref<InputEvent> &p_event) override;
 
 	void _native_popup();
-	void _native_dialog_cb(bool p_ok, const Vector<String> &p_files, int p_filter);
-	void _native_dialog_cb_with_options(bool p_ok, const Vector<String> &p_files, int p_filter, const Dictionary &p_selected_options);
+	void _native_dialog_cb(bool p_ok, const Vector<String> &p_files, int p_filter, uint64_t p_generation);
+	void _native_dialog_cb_with_options(bool p_ok, const Vector<String> &p_files, int p_filter, const Dictionary &p_selected_options, uint64_t p_generation);
 
 	bool _is_open_should_be_disabled();
 	void _thumbnail_callback(const Ref<Texture2D> &p_texture, const String &p_path);
@@ -364,6 +371,8 @@ private:
 	virtual void _post_popup() override;
 
 protected:
+	explicit FileDialog(bool p_custom_dialog_enabled);
+
 	Ref<DirAccess> dir_access;
 
 	bool favorites_changed = false;

@@ -37,6 +37,10 @@
 #include "editor/settings/editor_settings.h"
 #include "editor/themes/editor_scale.h"
 
+EditorFileDialog::EditorFileDialog() :
+		FileDialog(true) {
+}
+
 void EditorFileDialog::_item_menu_id_pressed(int p_option) {
 	// Use dependency dialog to delete the entry in the editor, but only for project files.
 	if (p_option == ITEM_MENU_DELETE && get_access() == ACCESS_RESOURCES) {

@@ -5,6 +5,14 @@ This checkout is a custom Godot build for developing a paint&animation app like 
 ## Build
 Use "Build: Windows Debug" in .vscode/tasks.json
 
+## Native File Dialogs
+
+Runtime `FileDialog` nodes always use the operating system's native file dialog on Windows, macOS, and Linux. Setting `use_native_dialog` to `false` does not disable native dialogs.
+
+The built-in Godot file browser controls are reserved for `EditorFileDialog`. Runtime `FileDialog` instances do not create those controls, so customization and display properties retain serialization compatibility but do not alter the native dialog, and internal control getters return null.
+
+Native dialog availability is required. An unavailable native backend completes the request as canceled instead of falling back to the built-in Godot file browser. Linux deployments require a working XDG desktop portal FileChooser implementation.
+
 ## Rendering
 
 Rendering work in this repository targets the RD renderer path; GLES3 compatibility does not need to be preserved.
