@@ -1,7 +1,7 @@
 name: Ciallo Godot Release
 
 # The workflow dispatch ref picker does not select release code. Every release
-# is built from the current origin/ciallo commit and its generated tag.
+# builds the current origin/ciallo commit before creating its immutable tag.
 on:
   workflow_dispatch:
 
@@ -14,10 +14,8 @@ concurrency:
 
 jobs:
   prepare:
-    name: Tag ciallo release
+    name: Resolve ciallo release
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
     outputs:
       ref: ${{ steps.release.outputs.ref }}
       sha: ${{ steps.release.outputs.sha }}
@@ -31,7 +29,7 @@ jobs:
           fetch-depth: 0
           token: ${{ github.token }}
 
-      - name: Read version and create release tag
+      - name: Resolve release metadata
         id: release
         shell: bash
         run: |
@@ -73,15 +71,10 @@ jobs:
             echo "Reusing $release_tag for origin/ciallo@$head_sha."
           else
             release_tag="${base_tag}.$((last_number + 1))"
-            git config user.name "${{ github.actor }}"
-            git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
-            git tag -a "$release_tag" "$head_sha" -m "Ciallo Godot $godot_version ($version_status)"
-            git push origin "refs/tags/$release_tag"
-            echo "Created $release_tag for origin/ciallo@$head_sha."
           fi
 
           {
-            echo "ref=$release_tag"
+            echo "ref=$head_sha"
             echo "sha=$head_sha"
             echo "status=$version_status"
             echo "tag=$release_tag"
@@ -100,9 +93,48 @@ jobs:
       version_status: ${{ needs.prepare.outputs.status }}
       produce_artifacts: true
 
+  tag:
+    name: Create immutable release tag
+    needs: [prepare, build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout verified commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Create tag
+        env:
+          GODOT_VERSION_STATUS: ${{ needs.prepare.outputs.status }}
+          HEAD_SHA: ${{ needs.prepare.outputs.sha }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch origin --tags
+          if git rev-parse -q --verify "refs/tags/$RELEASE_TAG" >/dev/null; then
+            tagged_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+            if [ "$tagged_sha" != "$HEAD_SHA" ]; then
+              echo "Immutable tag $RELEASE_TAG already points to $tagged_sha, not $HEAD_SHA."
+              exit 1
+            fi
+            echo "Reusing $RELEASE_TAG at $HEAD_SHA."
+            exit 0
+          fi
+
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+          git tag -a "$RELEASE_TAG" "$HEAD_SHA" -m "Ciallo Godot $RELEASE_TAG ($GODOT_VERSION_STATUS)"
+          git push origin "refs/tags/$RELEASE_TAG"
+
   publish-feed:
     name: Publish SDK feed
-    needs: [prepare, build]
+    needs: [prepare, build, tag]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -186,7 +218,7 @@ jobs:
 
   publish-release:
     name: Publish GitHub Release
-    needs: [prepare, build, deploy-pages]
+    needs: [prepare, build, tag, deploy-pages]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
