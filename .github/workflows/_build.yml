@@ -473,25 +473,41 @@ jobs:
           path: ${{ env.SCONS_CACHE }}
           key: scons-windows-templates|${{ github.event.repository.default_branch }}|${{ inputs.source_sha }}
 
-      - name: Collect templates with export filenames
+      - name: Package export templates
         if: inputs.produce_artifacts
-        shell: bash
+        shell: pwsh
         run: |
-          mkdir -p templates_out
-          REL="$(find ./bin -maxdepth 1 -type f -name 'godot.windows.template_release.x86_64*.exe' ! -name '*.console.exe' | sort | head -n1)"
-          DBG="$(find ./bin -maxdepth 1 -type f -name 'godot.windows.template_debug.x86_64*.exe' ! -name '*.console.exe' | sort | head -n1)"
-          test -n "$REL" && test -n "$DBG"
-          cp "$REL" templates_out/windows_release_x86_64.exe
-          cp "$DBG" templates_out/windows_debug_x86_64.exe
-          ls -lh templates_out/
+          $ErrorActionPreference = "Stop"
+          $release = Get-ChildItem -LiteralPath bin -File -Filter "godot.windows.template_release.x86_64*.exe" |
+            Where-Object { $_.Name -notlike "*.console.exe" } |
+            Sort-Object Name |
+            Select-Object -First 1
+          $debug = Get-ChildItem -LiteralPath bin -File -Filter "godot.windows.template_debug.x86_64*.exe" |
+            Where-Object { $_.Name -notlike "*.console.exe" } |
+            Sort-Object Name |
+            Select-Object -First 1
+          if (-not $release -or -not $debug) {
+            throw "Windows export template binaries were not found."
+          }
 
-      - name: Upload templates
+          $version = python -c 'import version; print(f"{version.major}.{version.minor}.{version.patch}")'
+          New-Item -ItemType Directory -Path templates | Out-Null
+          Copy-Item -LiteralPath $release.FullName -Destination templates/windows_release_x86_64.exe
+          Copy-Item -LiteralPath $debug.FullName -Destination templates/windows_debug_x86_64.exe
+          "$version.${{ inputs.version_status }}.mono" | Set-Content -LiteralPath templates/version.txt
+
+          $archive = "godot-export-templates-windows-x86_64-${{ inputs.version_status }}.zip"
+          Compress-Archive -LiteralPath templates -DestinationPath $archive
+          Get-Item -LiteralPath $archive | Format-List Name, Length
+
+      - name: Upload template archive
         if: inputs.produce_artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: templates-windows-x86_64
-          path: templates_out/
+          name: godot-export-templates-windows-x86_64-${{ inputs.version_status }}
+          path: godot-export-templates-windows-x86_64-${{ inputs.version_status }}.zip
           if-no-files-found: error
+          compression-level: 0
 
   linux-templates:
     name: Linux Export Templates
@@ -563,27 +579,35 @@ jobs:
           path: ${{ env.SCONS_CACHE }}
           key: scons-linux-templates|${{ github.event.repository.default_branch }}|${{ inputs.source_sha }}
 
-      - name: Collect templates with export filenames
+      - name: Package export templates
         if: inputs.produce_artifacts
         shell: bash
         run: |
-          mkdir -p templates_out
+          set -euo pipefail
           REL="$(find ./bin -maxdepth 1 -type f -name 'godot.linuxbsd.template_release.x86_64*' ! -name '*.so' | sort | head -n1)"
           DBG="$(find ./bin -maxdepth 1 -type f -name 'godot.linuxbsd.template_debug.x86_64*' ! -name '*.so' | sort | head -n1)"
           test -n "$REL" && test -n "$DBG"
           strip "$REL" "$DBG" 2>/dev/null || true
-          cp "$REL" templates_out/linux_release.x86_64
-          cp "$DBG" templates_out/linux_debug.x86_64
-          chmod +x templates_out/linux_release.x86_64 templates_out/linux_debug.x86_64
-          ls -lh templates_out/
 
-      - name: Upload templates
+          VER="$(python -c 'import version; print(f"{version.major}.{version.minor}.{version.patch}")')"
+          mkdir -p templates
+          cp "$REL" templates/linux_release.x86_64
+          cp "$DBG" templates/linux_debug.x86_64
+          chmod +x templates/linux_release.x86_64 templates/linux_debug.x86_64
+          printf '%s\n' "${VER}.${{ inputs.version_status }}.mono" > templates/version.txt
+
+          ARCHIVE="godot-export-templates-linux-x86_64-${{ inputs.version_status }}.zip"
+          zip -r -q "$ARCHIVE" templates
+          unzip -l "$ARCHIVE"
+
+      - name: Upload template archive
         if: inputs.produce_artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: templates-linux-x86_64
-          path: templates_out/
+          name: godot-export-templates-linux-x86_64-${{ inputs.version_status }}
+          path: godot-export-templates-linux-x86_64-${{ inputs.version_status }}.zip
           if-no-files-found: error
+          compression-level: 0
 
   macos-templates:
     name: macOS Export Templates
@@ -654,14 +678,14 @@ jobs:
           done
           ls -l bin/
 
-      - name: Assemble macos.zip bundle
+      - name: Package arm64 export templates
+        if: inputs.produce_artifacts
         shell: bash
         env:
           BUILD_NAME: ciallo
           GODOT_VERSION_STATUS: ${{ inputs.version_status }}
         run: |
-          # generate_bundle lipos the release+debug binaries into macos_template.app
-          # and zips it to bin/godot_macos*.zip (see platform/macos/platform_macos_builders.py).
+          set -euo pipefail
           scons platform=macos target=template_release arch=arm64 \
             vulkan=${{ steps.vulkan-sdk.outputs.enabled }} \
             debug_symbols=no \
@@ -669,11 +693,27 @@ jobs:
             generate_bundle=yes \
             "cache_path=${SCONS_CACHE}" \
             redirect_build_objects=no
-          mkdir -p templates_out
+
           BUNDLE="$(find ./bin -maxdepth 1 -type f -name 'godot_macos*.zip' | sort | head -n1)"
           test -n "$BUNDLE"
-          cp "$BUNDLE" templates_out/macos.zip
-          ls -lh templates_out/
+          mkdir -p templates staging
+          unzip -q "$BUNDLE" -d staging
+
+          REL="staging/macos_template.app/Contents/MacOS/godot_macos_release.universal"
+          DBG="staging/macos_template.app/Contents/MacOS/godot_macos_debug.universal"
+          test "$(lipo -archs "$REL")" = "arm64"
+          test "$(lipo -archs "$DBG")" = "arm64"
+          mv "$REL" staging/macos_template.app/Contents/MacOS/godot_macos_release.arm64
+          mv "$DBG" staging/macos_template.app/Contents/MacOS/godot_macos_debug.arm64
+          chmod +x staging/macos_template.app/Contents/MacOS/godot_macos_*.arm64
+          (cd staging && zip -r -q ../templates/macos.zip macos_template.app)
+
+          VER="$(python -c 'import version; print(f"{version.major}.{version.minor}.{version.patch}")')"
+          printf '%s\n' "${VER}.${{ inputs.version_status }}.mono" > templates/version.txt
+          ARCHIVE="godot-export-templates-macos-arm64-${{ inputs.version_status }}.zip"
+          zip -r -q "$ARCHIVE" templates
+          unzip -l templates/macos.zip | grep 'godot_macos_.*\.arm64'
+          unzip -l "$ARCHIVE"
 
       - name: Save SCons cache
         uses: actions/cache/save@v5
@@ -682,60 +722,11 @@ jobs:
           path: ${{ env.SCONS_CACHE }}
           key: scons-macos-templates|${{ github.event.repository.default_branch }}|${{ inputs.source_sha }}
 
-      - name: Upload templates
+      - name: Upload template archive
         if: inputs.produce_artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: templates-macos
-          path: templates_out/
+          name: godot-export-templates-macos-arm64-${{ inputs.version_status }}
+          path: godot-export-templates-macos-arm64-${{ inputs.version_status }}.zip
           if-no-files-found: error
-
-  package-templates:
-    name: Package export templates (.tpz)
-    if: inputs.produce_artifacts
-    needs: [windows-templates, linux-templates, macos-templates]
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.source_ref }}
-
-      - name: Download all template artifacts
-        uses: actions/download-artifact@v6
-        with:
-          pattern: templates-*
-          path: dl/
-          merge-multiple: true
-
-      - name: Assemble .tpz
-        id: tpz
-        shell: bash
-        run: |
-          # The editor extracts the .tpz into a version directory derived from
-          # version.txt, which must equal GODOT_VERSION_FULL_CONFIG:
-          #   <major>.<minor>.<patch>.<status>.mono
-          VER="$(python -c 'import version; print(f"{version.major}.{version.minor}.{version.patch}")')"
-          FULL="${VER}.${{ inputs.version_status }}.mono"
-
-          mkdir -p templates
-          cp dl/windows_release_x86_64.exe templates/
-          cp dl/windows_debug_x86_64.exe   templates/
-          cp dl/linux_release.x86_64       templates/
-          cp dl/linux_debug.x86_64         templates/
-          cp dl/macos.zip                  templates/
-          echo "$FULL" > templates/version.txt
-          cat templates/version.txt
-          ls -lh templates/
-
-          TPZ="godot-export-templates-${{ inputs.version_status }}.tpz"
-          # .tpz is a plain zip whose files live under the version.txt base dir.
-          zip -r "$TPZ" templates >/dev/null
-          echo "tpz=${TPZ}" >> "$GITHUB_OUTPUT"
-          ls -lh "$TPZ"
-
-      - name: Upload .tpz artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: godot-export-templates-${{ inputs.version_status }}
-          path: ${{ steps.tpz.outputs.tpz }}
+          compression-level: 0

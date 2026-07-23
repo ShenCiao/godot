@@ -204,5 +204,4 @@ jobs:
           tag_name: ${{ needs.prepare.outputs.tag }}
           files: |
             packages/*.zip
-            packages/*.tpz
           fail_on_unmatched_files: true
