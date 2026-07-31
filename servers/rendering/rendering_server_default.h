@@ -1025,6 +1025,9 @@ public:
 	FUNC2(canvas_item_set_use_parent_material, RID, bool)
 
 	FUNC5(canvas_item_set_visibility_notifier, RID, bool, const Rect2 &, const Callable &, const Callable &)
+	FUNC2(canvas_item_set_is_layer, RID, bool)
+	FUNC2(canvas_item_set_layer_blend_mode, RID, CanvasItemLayerBlendMode)
+	FUNC2(canvas_item_set_clipping_mask, RID, bool)
 
 	FUNC6(canvas_item_set_canvas_group_mode, RID, CanvasGroupMode, float, bool, float, bool)
 

@@ -59,6 +59,10 @@ public:
 		int ysort_index;
 		int ysort_parent_abs_z_index; // Absolute Z index of parent. Only populated and used when y-sorting.
 		uint32_t visibility_layer = 0xffffffff;
+		RendererCanvasRender::Item *layer_source_first = nullptr;
+		RendererCanvasRender::Item *layer_source_last = nullptr;
+		bool orphaned_clipping_warning_emitted = false;
+		bool layer_order_error_emitted = false;
 
 		Vector<Item *> child_items;
 
@@ -211,6 +215,7 @@ private:
 	void _collect_ysort_children(RendererCanvasCull::Item *p_canvas_item, RendererCanvasCull::Item *p_material_owner, const Color &p_modulate, RendererCanvasCull::Item **r_items, int &r_index, int &r_ysort_children_count, int p_z, uint32_t p_canvas_cull_mask);
 	int _count_ysort_children(RendererCanvasCull::Item *p_canvas_item);
 	void _mark_ysort_dirty(RendererCanvasCull::Item *ysort_owner);
+	void _mark_layer_stacks(Item *p_parent, Item *const *p_items, int p_item_count);
 
 	static constexpr int z_range = RS::CANVAS_ITEM_Z_MAX - RS::CANVAS_ITEM_Z_MIN + 1;
 
@@ -308,6 +313,9 @@ public:
 	Variant canvas_item_get_instance_shader_parameter_default_value(RID p_item, const StringName &p_parameter) const;
 
 	void canvas_item_set_visibility_notifier(RID p_item, bool p_enable, const Rect2 &p_area, const Callable &p_enter_callable, const Callable &p_exit_callable);
+	void canvas_item_set_is_layer(RID p_item, bool p_is_layer);
+	void canvas_item_set_layer_blend_mode(RID p_item, RS::CanvasItemLayerBlendMode p_blend_mode);
+	void canvas_item_set_clipping_mask(RID p_item, bool p_enabled);
 
 	void canvas_item_set_canvas_group_mode(RID p_item, RS::CanvasGroupMode p_mode, float p_clear_margin = 5.0, bool p_fit_empty = false, float p_fit_margin = 0.0, bool p_blur_mipmaps = false);
 

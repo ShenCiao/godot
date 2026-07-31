@@ -120,6 +120,8 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 				uint32_t use_lighting : 1;
 				uint32_t use_msdf : 1;
 				uint32_t use_lcd : 1;
+				uint32_t layer_premultiply : 1;
+				uint32_t layer_scale_associated_color : 1;
 			};
 		};
 	};
@@ -132,6 +134,8 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 		ShaderSpecialization shader_specialization = {};
 		uint32_t lcd_blend = 0;
 		uint32_t premul_blend = 0;
+		uint32_t layer_blend_mode = RESOLVED_LAYER_BLEND_NONE;
+		uint32_t clipped_layer = 0;
 		uint32_t ubershader = 0;
 
 		uint32_t hash() const {
@@ -142,6 +146,8 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 			h = hash_murmur3_one_32(shader_specialization.packed_0, h);
 			h = hash_murmur3_one_32(lcd_blend, h);
 			h = hash_murmur3_one_32(premul_blend, h);
+			h = hash_murmur3_one_32(layer_blend_mode, h);
+			h = hash_murmur3_one_32(clipped_layer, h);
 			h = hash_murmur3_one_32(ubershader, h);
 			return hash_fmix32(h);
 		}
@@ -552,6 +558,10 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 		bool use_lcd = false;
 		bool has_blend = false;
 		bool premul_blend = false;
+		ResolvedLayerBlendMode layer_blend_mode = RESOLVED_LAYER_BLEND_NONE;
+		bool clipped_layer = false;
+		bool layer_premultiply = false;
+		bool layer_scale_associated_color = false;
 
 		// batch-specific data
 		union {
@@ -665,6 +675,8 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 
 	RID default_clip_children_material;
 	RID default_clip_children_shader;
+	RID default_layer_stack_material;
+	RID default_layer_stack_shader;
 
 	RS::CanvasItemTextureFilter default_filter = RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR;
 	RS::CanvasItemTextureRepeat default_repeat = RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED;
@@ -693,6 +705,7 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 	};
 
 	inline RID _get_pipeline_specialization_or_ubershader(CanvasShaderData *p_shader_data, PipelineKey &r_pipeline_key, PushConstant &r_push_constant, RID p_mesh_instance = RID(), void *p_surface = nullptr, uint32_t p_surface_index = 0, RID *r_vertex_array = nullptr);
+	ResolvedLayerBlendMode _resolve_layer_blend_mode(const Item *p_item, const CanvasShaderData *p_shader_data) const;
 	void _render_batch_items(RenderTarget p_to_render_target, int p_item_count, const Transform2D &p_canvas_transform_inverse, Light *p_lights, bool &r_sdf_used, bool p_to_backbuffer = false, RenderingMethod::RenderInfo *r_render_info = nullptr);
 	void _record_item_commands(const Item *p_item, RenderTarget p_render_target, const Transform2D &p_base_transform, Item *&r_current_clip, Light *p_lights, bool &r_batch_broken, bool &r_sdf_used, Batch *&r_current_batch);
 	void _render_batch(RD::DrawListID p_draw_list, CanvasShaderData *p_shader_data, RenderingDevice::FramebufferFormatID p_framebuffer_format, Light *p_lights, Batch const *p_batch, RenderingMethod::RenderInfo *r_render_info = nullptr);

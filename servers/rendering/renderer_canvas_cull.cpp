@@ -157,6 +157,75 @@ void RendererCanvasCull::_release_canvas_group_z_list_scratch(CanvasItemZListScr
 	canvas_group_z_list_scratch_depth--;
 }
 
+void RendererCanvasCull::_mark_layer_stacks(Item *p_parent, Item *const *p_items, int p_item_count) {
+	Item *base = nullptr;
+	RendererCanvasRender::Item *last_clipped_source = nullptr;
+	bool has_child_layers = false;
+	bool invalid_order = false;
+
+	auto close_stack = [&]() {
+		if (base != nullptr && last_clipped_source != nullptr) {
+			last_clipped_source->layer_stack_ends.push_back(base);
+		}
+		last_clipped_source = nullptr;
+	};
+
+	for (int i = 0; i < p_item_count; i++) {
+		Item *item = p_items[i];
+		if (!item->is_layer) {
+			continue;
+		}
+
+		has_child_layers = true;
+		invalid_order |= item->z_index != 0 || !item->z_relative || item->behind;
+
+		if (!item->clipping_mask) {
+			close_stack();
+			base = item;
+			item->orphaned_clipping_warning_emitted = false;
+			continue;
+		}
+
+		if (base == nullptr) {
+			item->layer_draw_mode = RendererCanvasRender::Item::LAYER_DRAW_MODE_SKIP;
+			if (!item->orphaned_clipping_warning_emitted) {
+				WARN_PRINT("A Layer with clipping_mask enabled has no lower sibling Layer to use as its Clipping Base. It renders with zero coverage until a Base is available.");
+				item->orphaned_clipping_warning_emitted = true;
+			}
+			continue;
+		}
+
+		item->orphaned_clipping_warning_emitted = false;
+		if (base->layer_source_first == nullptr) {
+			item->layer_draw_mode = RendererCanvasRender::Item::LAYER_DRAW_MODE_SKIP;
+			continue;
+		}
+
+		item->layer_draw_mode = RendererCanvasRender::Item::LAYER_DRAW_MODE_CLIPPED;
+		if (item->layer_source_last == nullptr) {
+			continue;
+		}
+
+		if (last_clipped_source == nullptr) {
+			base->layer_draw_mode = RendererCanvasRender::Item::LAYER_DRAW_MODE_CLIPPING_BASE;
+			base->layer_stack_starts.push_back(base);
+		}
+		last_clipped_source = item;
+	}
+
+	close_stack();
+
+	if (p_parent != nullptr) {
+		invalid_order |= has_child_layers && p_parent->sort_y;
+		if (invalid_order && !p_parent->layer_order_error_emitted) {
+			ERR_PRINT("Layer siblings require z_index = 0, z_as_relative = true, show_behind_parent = false, and y_sort_enabled = false on their parent. Layer rendering is undefined for this configuration.");
+			p_parent->layer_order_error_emitted = true;
+		} else if (!invalid_order) {
+			p_parent->layer_order_error_emitted = false;
+		}
+	}
+}
+
 void RendererCanvasCull::_render_canvas_item_tree(RID p_to_render_target, Canvas::ChildItem *p_child_items, int p_child_item_count, const Transform2D &p_transform, const Rect2 &p_clip_rect, const Color &p_modulate, RendererCanvasRender::Light *p_lights, RendererCanvasRender::Light *p_directional_lights, RenderingServer::CanvasItemTextureFilter p_default_filter, RenderingServer::CanvasItemTextureRepeat p_default_repeat, bool p_snap_2d_vertices_to_pixel, uint32_t p_canvas_cull_mask, RenderingMethod::RenderInfo *r_render_info) {
 	RENDER_TIMESTAMP("Cull CanvasItem Tree");
 
@@ -171,6 +240,13 @@ void RendererCanvasCull::_render_canvas_item_tree(RID p_to_render_target, Canvas
 	for (int i = 0; i < p_child_item_count; i++) {
 		_cull_canvas_item(p_child_items[i].item, p_transform, p_clip_rect, Color(1, 1, 1, 1), 0, z_list, z_last_list, nullptr, nullptr, false, p_canvas_cull_mask, Point2(), 1, nullptr);
 	}
+
+	LocalVector<Item *> root_items;
+	root_items.resize(p_child_item_count);
+	for (int i = 0; i < p_child_item_count; i++) {
+		root_items[i] = p_child_items[i].item;
+	}
+	_mark_layer_stacks(nullptr, root_items.ptr(), root_items.size());
 
 	RendererCanvasRender::Item *list = nullptr;
 	RendererCanvasRender::Item *list_end = nullptr;
@@ -348,6 +424,9 @@ void RendererCanvasCull::_attach_canvas_item_for_draw(RendererCanvasCull::Item *
 			r_canvas_group_from->canvas_group_owner = ci;
 			if (ci->canvas_group->mode == RS::CANVAS_GROUP_MODE_TRANSPARENT) {
 				r_canvas_group_from->canvas_group_owners.push_back(ci);
+				if (ci->is_layer) {
+					ci->layer_source_first = r_canvas_group_from;
+				}
 			}
 		} else if (_has_only_generated_canvas_group_command(ci)) {
 			// The generated CanvasGroup draw rect from a previous frame must not be
@@ -372,6 +451,14 @@ void RendererCanvasCull::_attach_canvas_item_for_draw(RendererCanvasCull::Item *
 
 			ci->z_final = p_z;
 			_append_canvas_item_span(ci, ci, p_z, r_z_list, r_z_last_list, r_touched_z_indices);
+			if (ci->is_layer) {
+				if (p_use_canvas_group && ci->canvas_group != nullptr && ci->canvas_group->mode == RS::CANVAS_GROUP_MODE_TRANSPARENT) {
+					ci->layer_source_last = ci;
+				} else if (ci->canvas_group == nullptr) {
+					ci->layer_source_first = ci;
+					ci->layer_source_last = ci;
+				}
+			}
 		}
 
 		if (ci->visibility_notifier) {
@@ -390,6 +477,11 @@ void RendererCanvasCull::_attach_canvas_item_for_draw(RendererCanvasCull::Item *
 
 void RendererCanvasCull::_cull_canvas_item(Item *p_canvas_item, const Transform2D &p_parent_xform, const Rect2 &p_clip_rect, const Color &p_modulate, int p_z, RendererCanvasRender::Item **r_z_list, RendererCanvasRender::Item **r_z_last_list, Item *p_canvas_clip, Item *p_material_owner, bool p_is_already_y_sorted, uint32_t p_canvas_cull_mask, const Point2 &p_repeat_size, int p_repeat_times, RendererCanvasRender::Item *p_repeat_source_item, LocalVector<int> *r_touched_z_indices) {
 	Item *ci = p_canvas_item;
+	ci->layer_source_first = nullptr;
+	ci->layer_source_last = nullptr;
+	ci->layer_draw_mode = RendererCanvasRender::Item::LAYER_DRAW_MODE_DIRECT;
+	ci->layer_stack_starts.clear();
+	ci->layer_stack_ends.clear();
 
 	if (!ci->visible) {
 		return;
@@ -562,6 +654,8 @@ void RendererCanvasCull::_cull_canvas_item(Item *p_canvas_item, const Transform2
 			}
 		}
 
+		_mark_layer_stacks(ci, ci->child_items.ptr(), ci->child_items.size());
+
 		RendererCanvasRender::Item *local_first = nullptr;
 		RendererCanvasRender::Item *local_last = nullptr;
 		_flatten_canvas_item_z_lists(local_z_list, local_z_last_list, local_touched_z_indices, local_first, local_last);
@@ -641,6 +735,8 @@ void RendererCanvasCull::_cull_canvas_item(Item *p_canvas_item, const Transform2
 			_cull_canvas_item(child_items[i], final_xform, p_clip_rect, modulate, p_z, r_z_list, r_z_last_list, (Item *)ci->final_clip_owner, p_material_owner, false, p_canvas_cull_mask, repeat_size, repeat_times, repeat_source_item, r_touched_z_indices);
 		}
 	}
+
+	_mark_layer_stacks(ci, ci->child_items.ptr(), ci->child_items.size());
 }
 
 void RendererCanvasCull::render_canvas(RID p_render_target, Canvas *p_canvas, const Transform2D &p_transform, RendererCanvasRender::Light *p_lights, RendererCanvasRender::Light *p_directional_lights, const Rect2 &p_clip_rect, RenderingServer::CanvasItemTextureFilter p_default_filter, RenderingServer::CanvasItemTextureRepeat p_default_repeat, bool p_snap_2d_transforms_to_pixel, bool p_snap_2d_vertices_to_pixel, uint32_t canvas_cull_mask, RenderingMethod::RenderInfo *r_render_info) {
@@ -2178,9 +2274,32 @@ void RendererCanvasCull::canvas_item_transform_physics_interpolation(RID p_item,
 	canvas_item->xform_curr = p_transform * canvas_item->xform_curr;
 }
 
+void RendererCanvasCull::canvas_item_set_is_layer(RID p_item, bool p_is_layer) {
+	Item *canvas_item = canvas_item_owner.get_or_null(p_item);
+	ERR_FAIL_NULL(canvas_item);
+	canvas_item->is_layer = p_is_layer;
+}
+
+void RendererCanvasCull::canvas_item_set_layer_blend_mode(RID p_item, RS::CanvasItemLayerBlendMode p_blend_mode) {
+	Item *canvas_item = canvas_item_owner.get_or_null(p_item);
+	ERR_FAIL_NULL(canvas_item);
+	ERR_FAIL_INDEX(p_blend_mode, RS::CANVAS_ITEM_LAYER_BLEND_MODE_MAX);
+	canvas_item->layer_blend_mode = p_blend_mode;
+}
+
+void RendererCanvasCull::canvas_item_set_clipping_mask(RID p_item, bool p_enabled) {
+	Item *canvas_item = canvas_item_owner.get_or_null(p_item);
+	ERR_FAIL_NULL(canvas_item);
+	canvas_item->clipping_mask = p_enabled;
+}
+
 void RendererCanvasCull::canvas_item_set_canvas_group_mode(RID p_item, RS::CanvasGroupMode p_mode, float p_clear_margin, bool p_fit_empty, float p_fit_margin, bool p_blur_mipmaps) {
 	Item *canvas_item = canvas_item_owner.get_or_null(p_item);
 	ERR_FAIL_NULL(canvas_item);
+	if (p_mode == RS::CANVAS_GROUP_MODE_TRANSPARENT && p_blur_mipmaps) {
+		WARN_PRINT_ONCE("CanvasGroup mipmaps are disabled for layer rendering. The property value is retained for serialization compatibility but has no rendering effect.");
+		p_blur_mipmaps = false;
+	}
 
 	if (p_mode == RS::CANVAS_GROUP_MODE_DISABLED) {
 		if (canvas_item->canvas_group != nullptr) {

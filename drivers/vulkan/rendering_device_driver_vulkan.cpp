@@ -660,13 +660,16 @@ Error RenderingDeviceDriverVulkan::_check_device_features() {
 	vkGetPhysicalDeviceFeatures(physical_device, &physical_device_features);
 
 	// Check for required features.
-	if (!physical_device_features.imageCubeArray || !physical_device_features.independentBlend) {
+	if (!physical_device_features.imageCubeArray || !physical_device_features.independentBlend || !physical_device_features.dualSrcBlend) {
 		String error_string = vformat("Your GPU (%s) does not support the following features which are required to use Vulkan-based renderers in Godot:\n\n", context_device.name);
 		if (!physical_device_features.imageCubeArray) {
 			error_string += "- No support for image cube arrays.\n";
 		}
 		if (!physical_device_features.independentBlend) {
 			error_string += "- No support for independentBlend.\n";
+		}
+		if (!physical_device_features.dualSrcBlend) {
+			error_string += "- No support for dualSrcBlend.\n";
 		}
 		error_string += "\nThis is usually a hardware limitation, so updating graphics drivers won't help in most cases.";
 

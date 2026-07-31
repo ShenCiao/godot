@@ -780,15 +780,23 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 	to_render_target.use_linear_colors = use_linear_colors;
 	to_render_target.screen_texture_size = texture_storage->render_target_get_size(p_to_render_target);
 
-	struct CanvasGroupStackEntry {
+	struct RenderTargetStackEntry {
+		enum Type {
+			TYPE_CANVAS_GROUP,
+			TYPE_LAYER_STACK,
+		};
+
+		Type type = TYPE_CANVAS_GROUP;
 		Item *owner = nullptr;
 		int buffer_index = 0;
 		RID texture;
 		Size2i texture_size;
+		Rect2 texture_rect;
+		ResolvedLayerBlendMode layer_blend_mode = RESOLVED_LAYER_BLEND_NONE;
 		RenderTarget target;
 	};
 
-	LocalVector<CanvasGroupStackEntry> canvas_group_stack;
+	LocalVector<RenderTargetStackEntry> render_target_stack;
 
 	auto get_main_color_uniform_set = [&]() {
 		RID uniform_set = texture_storage->render_target_get_backbuffer_uniform_set(p_to_render_target);
@@ -799,10 +807,10 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 	};
 
 	auto get_current_render_target = [&]() -> RenderTarget & {
-		if (canvas_group_stack.is_empty()) {
+		if (render_target_stack.is_empty()) {
 			return to_render_target;
 		}
-		return canvas_group_stack[canvas_group_stack.size() - 1].target;
+		return render_target_stack[render_target_stack.size() - 1].target;
 	};
 
 	auto flush_render_items = [&](RenderTarget &p_render_target, bool p_to_backbuffer = false) {
@@ -816,15 +824,36 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		item_count = 0;
 	};
 
-	auto push_transparent_canvas_group = [&](Item *p_owner) {
+	auto resolve_item_layer_blend_mode = [&](Item *p_item) {
+		CanvasShaderData *shader_data = shader.default_version_data;
+		RID material = p_item->material_owner == nullptr ? p_item->material : p_item->material_owner->material;
+		if (material.is_valid()) {
+			CanvasMaterialData *material_data = static_cast<CanvasMaterialData *>(material_storage->material_get_data(material, RendererRD::MaterialStorage::SHADER_TYPE_2D));
+			if (material_data && material_data->shader_data->version.is_valid() && material_data->shader_data->is_valid()) {
+				shader_data = material_data->shader_data;
+			}
+		}
+		return _resolve_layer_blend_mode(p_item, shader_data);
+	};
+
+	auto push_scratch_target = [&](RenderTargetStackEntry::Type p_type, Item *p_owner, const Rect2 &p_texture_rect, bool p_use_mipmaps, ResolvedLayerBlendMode p_layer_blend_mode, int p_avoid_buffer_index = -1) {
 		RenderTarget &parent_target = get_current_render_target();
 		flush_render_items(parent_target);
 
-		const int buffer_index = canvas_group_stack.size();
+		int buffer_index = 0;
+		for (;; buffer_index++) {
+			bool in_use = buffer_index == p_avoid_buffer_index;
+			for (const RenderTargetStackEntry &entry : render_target_stack) {
+				in_use |= entry.buffer_index == buffer_index;
+			}
+			if (!in_use) {
+				break;
+			}
+		}
 		const RendererRD::TextureStorage::CanvasGroupBufferRIDs buffer =
 				texture_storage->render_target_prepare_canvas_group_buffer_for_draw(
-						p_to_render_target, buffer_index, p_owner->global_rect_cache,
-						p_owner->canvas_group->blur_mipmaps, Color(0, 0, 0, 0));
+						p_to_render_target, buffer_index, p_texture_rect,
+						p_use_mipmaps, Color(0, 0, 0, 0));
 
 		RenderTarget group_target;
 		group_target.render_target = p_to_render_target;
@@ -833,29 +862,43 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		group_target.use_render_target_clear = false;
 		group_target.render_region = Rect2(Vector2(), texture_storage->render_target_get_size(p_to_render_target));
 
-		if (canvas_group_stack.is_empty()) {
+		if (render_target_stack.is_empty()) {
 			group_target.screen_texture = texture_storage->render_target_get_rd_texture(p_to_render_target);
 			group_target.screen_texture_size = texture_storage->render_target_get_size(p_to_render_target);
 			group_target.base_uniform_set = get_main_color_uniform_set();
 		} else {
-			const CanvasGroupStackEntry &parent_entry = canvas_group_stack[canvas_group_stack.size() - 1];
+			const RenderTargetStackEntry &parent_entry = render_target_stack[render_target_stack.size() - 1];
 			group_target.screen_texture = parent_entry.texture;
 			group_target.screen_texture_size = parent_entry.texture_size;
 			group_target.base_uniform_set = _ensure_canvas_group_buffer_uniform_set(p_to_render_target, parent_entry.buffer_index, parent_entry.texture);
 		}
 
-		CanvasGroupStackEntry entry;
+		RenderTargetStackEntry entry;
+		entry.type = p_type;
 		entry.owner = p_owner;
 		entry.buffer_index = buffer_index;
 		entry.texture = buffer.texture;
 		entry.texture_size = buffer.size;
+		entry.texture_rect = p_texture_rect;
+		entry.layer_blend_mode = p_layer_blend_mode;
 		entry.target = group_target;
-		canvas_group_stack.push_back(entry);
+		render_target_stack.push_back(entry);
 	};
 
-	auto close_transparent_canvas_group = [&](Item *p_owner) {
-		const uint32_t stack_index = canvas_group_stack.size() - 1;
-		CanvasGroupStackEntry &entry = canvas_group_stack[stack_index];
+	auto push_transparent_canvas_group = [&](Item *p_owner) {
+		push_scratch_target(RenderTargetStackEntry::TYPE_CANVAS_GROUP, p_owner, p_owner->global_rect_cache, p_owner->canvas_group->blur_mipmaps, RESOLVED_LAYER_BLEND_NONE);
+	};
+
+	auto push_layer_stack = [&](Item *p_base, int p_avoid_buffer_index) {
+		push_scratch_target(RenderTargetStackEntry::TYPE_LAYER_STACK, p_base, p_base->global_rect_cache, false, resolve_item_layer_blend_mode(p_base), p_avoid_buffer_index);
+	};
+
+	auto prepare_transparent_canvas_group_composite = [&](Item *p_owner) -> int {
+		DEV_ASSERT(!render_target_stack.is_empty());
+		const uint32_t stack_index = render_target_stack.size() - 1;
+		RenderTargetStackEntry &entry = render_target_stack[stack_index];
+		DEV_ASSERT(entry.type == RenderTargetStackEntry::TYPE_CANVAS_GROUP);
+		DEV_ASSERT(entry.owner == p_owner);
 		flush_render_items(entry.target);
 
 		const int buffer_index = entry.buffer_index;
@@ -865,23 +908,63 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 			texture_storage->render_target_gen_canvas_group_buffer_mipmaps(p_to_render_target, buffer_index, p_owner->global_rect_cache);
 		}
 
-		canvas_group_stack.remove_at(stack_index);
-
-		RenderTarget composite_target = get_current_render_target();
-		composite_target.clear_requested = false;
+		render_target_stack.remove_at(stack_index);
 
 		p_owner->canvas_group_texture = group_texture;
 		p_owner->canvas_group_texture_size = group_texture_size;
 		p_owner->use_canvas_group = true;
-		items[item_count++] = p_owner;
+		return buffer_index;
+	};
+
+	auto close_layer_stack = [&](Item *p_base) {
+		DEV_ASSERT(!render_target_stack.is_empty());
+		const uint32_t stack_index = render_target_stack.size() - 1;
+		RenderTargetStackEntry entry = render_target_stack[stack_index];
+		DEV_ASSERT(entry.type == RenderTargetStackEntry::TYPE_LAYER_STACK);
+		DEV_ASSERT(entry.owner == p_base);
+		flush_render_items(entry.target);
+		render_target_stack.remove_at(stack_index);
+
+		Item composite_item;
+		Item::CanvasGroup composite_group;
+		composite_group.mode = RS::CANVAS_GROUP_MODE_TRANSPARENT;
+		composite_group.fit_empty = true;
+		composite_group.fit_margin = 0.0;
+		composite_group.blur_mipmaps = false;
+		composite_group.clear_margin = 0.0;
+
+		Item::CommandRect *rect = composite_item.alloc_command<Item::CommandRect>();
+		rect->flags = CANVAS_RECT_IS_GROUP;
+		rect->rect = entry.texture_rect;
+		rect->modulate = Color(1, 1, 1, 1);
+
+		composite_item.canvas_group = &composite_group;
+		composite_item.use_canvas_group = true;
+		composite_item.canvas_group_texture = entry.texture;
+		composite_item.canvas_group_texture_size = entry.texture_size;
+		composite_item.canvas_group_texture_rect = entry.texture_rect;
+		composite_item.material = default_layer_stack_material;
+		composite_item.final_modulate = Color(1, 1, 1, 1);
+		composite_item.final_transform = p_canvas_transform;
+		composite_item.global_rect_cache = entry.texture_rect;
+		composite_item.texture_filter = RS::CANVAS_ITEM_TEXTURE_FILTER_NEAREST;
+		composite_item.light_mask = 0;
+		composite_item.z_final = p_base->z_final;
+		composite_item.is_layer = true;
+		composite_item.layer_draw_mode = Item::LAYER_DRAW_MODE_STACK_COMPOSITE;
+		composite_item.layer_composite_blend_mode = entry.layer_blend_mode;
+
+		RenderTarget &composite_target = get_current_render_target();
+		composite_target.clear_requested = false;
+		items[item_count++] = &composite_item;
 		flush_render_items(composite_target);
-		p_owner->use_canvas_group = false;
-		p_owner->canvas_group_texture = RID();
-		p_owner->canvas_group_texture_size = Size2i();
 	};
 
 	while (ci) {
-		if (ci->copy_back_buffer && canvas_group_owner == nullptr && canvas_group_stack.is_empty()) {
+		bool transparent_group_composite = false;
+		int transparent_group_source_buffer = -1;
+
+		if (ci->copy_back_buffer && canvas_group_owner == nullptr && render_target_stack.is_empty()) {
 			backbuffer_copy = true;
 
 			if (ci->copy_back_buffer->full) {
@@ -896,7 +979,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		if (material.is_valid()) {
 			CanvasMaterialData *md = static_cast<CanvasMaterialData *>(material_storage->material_get_data(material, RendererRD::MaterialStorage::SHADER_TYPE_2D));
 			if (md && md->shader_data->is_valid()) {
-				if (md->shader_data->uses_screen_texture && canvas_group_owner == nullptr && canvas_group_stack.is_empty()) {
+				if (md->shader_data->uses_screen_texture && canvas_group_owner == nullptr && render_target_stack.is_empty()) {
 					if (!material_screen_texture_cached) {
 						backbuffer_copy = true;
 						back_buffer_rect = Rect2();
@@ -943,7 +1026,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 			ci->canvas_group_owner = nullptr;
 		}
 
-		if (ci->canvas_group_owner != nullptr && canvas_group_stack.is_empty()) {
+		if (ci->canvas_group_owner != nullptr && render_target_stack.is_empty()) {
 			if (canvas_group_owner == nullptr) {
 				// Canvas group begins here, render until before this item
 				flush_render_items(to_render_target);
@@ -967,17 +1050,21 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 			ci->canvas_group_owner = nullptr; //must be cleared
 		}
 
-		if (!canvas_group_stack.is_empty() && ci == canvas_group_stack[canvas_group_stack.size() - 1].owner) {
-			close_transparent_canvas_group(ci);
-			ci = ci->next;
-			continue;
+		if (!render_target_stack.is_empty()) {
+			const RenderTargetStackEntry &entry = render_target_stack[render_target_stack.size() - 1];
+			if (entry.type == RenderTargetStackEntry::TYPE_CANVAS_GROUP && ci == entry.owner) {
+				transparent_group_source_buffer = prepare_transparent_canvas_group_composite(ci);
+				transparent_group_composite = true;
+			}
 		}
 
-		if (canvas_group_owner == nullptr && canvas_group_stack.is_empty() && ci->canvas_group != nullptr && ci->canvas_group->mode != RS::CANVAS_GROUP_MODE_CLIP_AND_DRAW) {
+		if (!transparent_group_composite && canvas_group_owner == nullptr && render_target_stack.is_empty() && ci->canvas_group != nullptr && ci->canvas_group->mode != RS::CANVAS_GROUP_MODE_CLIP_AND_DRAW) {
 			skip_item = true;
 		}
 
-		if (ci == canvas_group_owner) {
+		if (transparent_group_composite) {
+			// The transparent CanvasGroup source is ready for the common Layer path below.
+		} else if (ci == canvas_group_owner) {
 			flush_render_items(to_render_target, true);
 
 			if (ci->canvas_group->blur_mipmaps) {
@@ -1013,14 +1100,36 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 			material_screen_texture_mipmaps_cached = true;
 		}
 
-		if (skip_item) {
+		if (ci->layer_draw_mode != Item::LAYER_DRAW_MODE_SKIP) {
+			for (Item *base : ci->layer_stack_starts) {
+				push_layer_stack(base, transparent_group_source_buffer);
+			}
+		}
+
+		bool queued_item = false;
+		if (skip_item || ci->layer_draw_mode == Item::LAYER_DRAW_MODE_SKIP) {
 			skip_item = false;
 		} else {
 			items[item_count++] = ci;
+			queued_item = true;
+		}
+
+		if (queued_item && (transparent_group_composite || !ci->layer_stack_ends.is_empty())) {
+			flush_render_items(get_current_render_target());
+		}
+
+		for (int i = int(ci->layer_stack_ends.size()) - 1; i >= 0; i--) {
+			close_layer_stack(ci->layer_stack_ends[i]);
+		}
+
+		if (transparent_group_composite) {
+			ci->use_canvas_group = false;
+			ci->canvas_group_texture = RID();
+			ci->canvas_group_texture_size = Size2i();
 		}
 
 		if (!ci->next || item_count == MAX_RENDER_ITEMS - 1) {
-			flush_render_items(get_current_render_target(), canvas_group_owner != nullptr && canvas_group_stack.is_empty());
+			flush_render_items(get_current_render_target(), canvas_group_owner != nullptr && render_target_stack.is_empty());
 		}
 
 		ci = ci->next;
@@ -1602,6 +1711,45 @@ void RendererCanvasRenderRD::CanvasShaderData::_clear_vertex_input_mask_cache() 
 	}
 }
 
+RendererCanvasRenderRD::ResolvedLayerBlendMode RendererCanvasRenderRD::_resolve_layer_blend_mode(const Item *p_item, const CanvasShaderData *p_shader_data) const {
+	if (!p_item->is_layer) {
+		return RESOLVED_LAYER_BLEND_NONE;
+	}
+
+	if (p_item->layer_draw_mode == Item::LAYER_DRAW_MODE_STACK_COMPOSITE) {
+		return p_item->layer_composite_blend_mode;
+	}
+
+	switch (p_item->layer_blend_mode) {
+		case RS::CANVAS_ITEM_LAYER_BLEND_MODE_NORMAL:
+			return RESOLVED_LAYER_BLEND_NORMAL;
+		case RS::CANVAS_ITEM_LAYER_BLEND_MODE_ADD:
+			return RESOLVED_LAYER_BLEND_ADD;
+		case RS::CANVAS_ITEM_LAYER_BLEND_MODE_MULTIPLY:
+			return RESOLVED_LAYER_BLEND_MULTIPLY;
+		case RS::CANVAS_ITEM_LAYER_BLEND_MODE_DEFAULT:
+			break;
+		default:
+			ERR_FAIL_V(RESOLVED_LAYER_BLEND_NORMAL);
+	}
+
+	switch (RendererRD::MaterialStorage::ShaderData::BlendMode(p_shader_data->blend_mode)) {
+		case RendererRD::MaterialStorage::ShaderData::BLEND_MODE_ADD:
+			return RESOLVED_LAYER_BLEND_ADD;
+		case RendererRD::MaterialStorage::ShaderData::BLEND_MODE_SUB:
+			return RESOLVED_LAYER_BLEND_SUBTRACT;
+		case RendererRD::MaterialStorage::ShaderData::BLEND_MODE_MUL:
+			return RESOLVED_LAYER_BLEND_MULTIPLY;
+		case RendererRD::MaterialStorage::ShaderData::BLEND_MODE_DISABLED:
+			return RESOLVED_LAYER_BLEND_REPLACE;
+		case RendererRD::MaterialStorage::ShaderData::BLEND_MODE_MIX:
+		case RendererRD::MaterialStorage::ShaderData::BLEND_MODE_ALPHA_TO_COVERAGE:
+		case RendererRD::MaterialStorage::ShaderData::BLEND_MODE_PREMULTIPLIED_ALPHA:
+		default:
+			return RESOLVED_LAYER_BLEND_NORMAL;
+	}
+}
+
 void RendererCanvasRenderRD::CanvasShaderData::_create_pipeline(PipelineKey p_pipeline_key) {
 #if PRINT_PIPELINE_COMPILATION_KEYS
 	print_line(
@@ -1615,11 +1763,72 @@ void RendererCanvasRenderRD::CanvasShaderData::_create_pipeline(PipelineKey p_pi
 			"LCD:", p_pipeline_key.lcd_blend);
 #endif
 
-	RendererRD::MaterialStorage::ShaderData::BlendMode blend_mode_rd = p_pipeline_key.premul_blend ? RendererRD::MaterialStorage::ShaderData::BLEND_MODE_PREMULTIPLIED_ALPHA : RendererRD::MaterialStorage::ShaderData::BlendMode(blend_mode);
 	RD::PipelineColorBlendState blend_state;
 	RD::PipelineColorBlendState::Attachment attachment;
 	uint32_t dynamic_state_flags = 0;
-	if (p_pipeline_key.lcd_blend) {
+	if (p_pipeline_key.layer_blend_mode != RESOLVED_LAYER_BLEND_NONE) {
+		attachment.enable_blend = p_pipeline_key.layer_blend_mode != RESOLVED_LAYER_BLEND_REPLACE || p_pipeline_key.clipped_layer;
+		attachment.alpha_blend_op = RD::BLEND_OP_ADD;
+		attachment.color_blend_op = RD::BLEND_OP_ADD;
+
+		if (p_pipeline_key.clipped_layer) {
+			attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_ZERO;
+			attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+
+			switch (p_pipeline_key.layer_blend_mode) {
+				case RESOLVED_LAYER_BLEND_NORMAL:
+					attachment.src_color_blend_factor = RD::BLEND_FACTOR_DST_ALPHA;
+					attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+					break;
+				case RESOLVED_LAYER_BLEND_ADD:
+					attachment.src_color_blend_factor = RD::BLEND_FACTOR_DST_ALPHA;
+					attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE;
+					break;
+				case RESOLVED_LAYER_BLEND_SUBTRACT:
+					attachment.color_blend_op = RD::BLEND_OP_REVERSE_SUBTRACT;
+					attachment.src_color_blend_factor = RD::BLEND_FACTOR_DST_ALPHA;
+					attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE;
+					break;
+				case RESOLVED_LAYER_BLEND_MULTIPLY:
+					attachment.src_color_blend_factor = RD::BLEND_FACTOR_ZERO;
+					attachment.dst_color_blend_factor = RD::BLEND_FACTOR_SRC1_COLOR;
+					break;
+				case RESOLVED_LAYER_BLEND_REPLACE:
+					attachment.src_color_blend_factor = RD::BLEND_FACTOR_DST_ALPHA;
+					attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ZERO;
+					break;
+				default:
+					ERR_FAIL();
+			}
+		} else {
+			attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+			attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+
+			switch (p_pipeline_key.layer_blend_mode) {
+				case RESOLVED_LAYER_BLEND_NORMAL:
+					attachment.src_color_blend_factor = RD::BLEND_FACTOR_ONE;
+					attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+					break;
+				case RESOLVED_LAYER_BLEND_ADD:
+					attachment.src_color_blend_factor = RD::BLEND_FACTOR_ONE;
+					attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE;
+					break;
+				case RESOLVED_LAYER_BLEND_SUBTRACT:
+					attachment.color_blend_op = RD::BLEND_OP_REVERSE_SUBTRACT;
+					attachment.src_color_blend_factor = RD::BLEND_FACTOR_ONE;
+					attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE;
+					break;
+				case RESOLVED_LAYER_BLEND_MULTIPLY:
+					attachment.src_color_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+					attachment.dst_color_blend_factor = RD::BLEND_FACTOR_SRC1_COLOR;
+					break;
+				case RESOLVED_LAYER_BLEND_REPLACE:
+					break;
+				default:
+					ERR_FAIL();
+			}
+		}
+	} else if (p_pipeline_key.lcd_blend) {
 		attachment.enable_blend = true;
 		attachment.alpha_blend_op = RD::BLEND_OP_ADD;
 		attachment.color_blend_op = RD::BLEND_OP_ADD;
@@ -1629,6 +1838,7 @@ void RendererCanvasRenderRD::CanvasShaderData::_create_pipeline(PipelineKey p_pi
 		attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 		dynamic_state_flags = RD::DYNAMIC_STATE_BLEND_CONSTANTS;
 	} else {
+		RendererRD::MaterialStorage::ShaderData::BlendMode blend_mode_rd = p_pipeline_key.premul_blend ? RendererRD::MaterialStorage::ShaderData::BLEND_MODE_PREMULTIPLIED_ALPHA : RendererRD::MaterialStorage::ShaderData::BlendMode(blend_mode);
 		attachment = RendererRD::MaterialStorage::ShaderData::blend_mode_to_blend_attachment(blend_mode_rd);
 	}
 
@@ -2207,6 +2417,19 @@ void fragment() {
 	}
 
 	{
+		default_layer_stack_shader = material_storage->shader_allocate();
+		material_storage->shader_initialize(default_layer_stack_shader);
+		material_storage->shader_set_code(default_layer_stack_shader, R"(
+shader_type canvas_item;
+render_mode unshaded, blend_premul_alpha;
+)");
+
+		default_layer_stack_material = material_storage->material_allocate();
+		material_storage->material_initialize(default_layer_stack_material);
+		material_storage->material_set_shader(default_layer_stack_material, default_layer_stack_shader);
+	}
+
+	{
 		uint32_t cache_size = uint32_t(GLOBAL_GET("rendering/2d/batching/uniform_set_cache_size"));
 		rid_set_to_uniform_set.set_capacity(cache_size);
 	}
@@ -2313,16 +2536,32 @@ void RendererCanvasRenderRD::_render_batch_items(RenderTarget p_to_render_target
 				}
 			}
 
+			CanvasMaterialData *material_data = nullptr;
+			if (material.is_valid()) {
+				material_data = static_cast<CanvasMaterialData *>(material_storage->material_get_data(material, RendererRD::MaterialStorage::SHADER_TYPE_2D));
+			}
+
 			if (material != current_batch->material) {
 				current_batch = _new_batch(batch_broken);
-
-				CanvasMaterialData *material_data = nullptr;
-				if (material.is_valid()) {
-					material_data = static_cast<CanvasMaterialData *>(material_storage->material_get_data(material, RendererRD::MaterialStorage::SHADER_TYPE_2D));
-				}
-
 				current_batch->material = material;
 				current_batch->material_data = material_data;
+			}
+
+			CanvasShaderData *resolved_shader_data = shader.default_version_data;
+			if (material_data && material_data->shader_data->version.is_valid() && material_data->shader_data->is_valid()) {
+				resolved_shader_data = material_data->shader_data;
+			}
+
+			const ResolvedLayerBlendMode layer_blend_mode = ci->layer_draw_mode == Item::LAYER_DRAW_MODE_CLIPPING_BASE ? RESOLVED_LAYER_BLEND_NORMAL : _resolve_layer_blend_mode(ci, resolved_shader_data);
+			const bool clipped_layer = ci->layer_draw_mode == Item::LAYER_DRAW_MODE_CLIPPED;
+			const bool layer_premultiply = ci->is_layer && ci->canvas_group == nullptr && resolved_shader_data->blend_mode != RendererRD::MaterialStorage::ShaderData::BLEND_MODE_PREMULTIPLIED_ALPHA;
+			const bool layer_scale_associated_color = ci->is_layer && ci->canvas_group != nullptr;
+			if (layer_blend_mode != current_batch->layer_blend_mode || clipped_layer != current_batch->clipped_layer || layer_premultiply != current_batch->layer_premultiply || layer_scale_associated_color != current_batch->layer_scale_associated_color) {
+				current_batch = _new_batch(batch_broken);
+				current_batch->layer_blend_mode = layer_blend_mode;
+				current_batch->clipped_layer = clipped_layer;
+				current_batch->layer_premultiply = layer_premultiply;
+				current_batch->layer_scale_associated_color = layer_scale_associated_color;
 			}
 
 			if (ci->repeat_source_item == nullptr || ci->repeat_size == Vector2()) {
@@ -3216,8 +3455,12 @@ void RendererCanvasRenderRD::_render_batch(RD::DrawListID p_draw_list, CanvasSha
 	pipeline_key.shader_specialization.use_lighting = p_batch->use_lighting;
 	pipeline_key.shader_specialization.use_msdf = p_batch->use_msdf;
 	pipeline_key.shader_specialization.use_lcd = p_batch->use_lcd;
+	pipeline_key.shader_specialization.layer_premultiply = p_batch->layer_premultiply;
+	pipeline_key.shader_specialization.layer_scale_associated_color = p_batch->layer_scale_associated_color;
 	pipeline_key.lcd_blend = p_batch->has_blend;
 	pipeline_key.premul_blend = p_batch->premul_blend;
+	pipeline_key.layer_blend_mode = p_batch->layer_blend_mode;
+	pipeline_key.clipped_layer = p_batch->clipped_layer;
 
 	switch (p_batch->command_type) {
 		case Item::Command::TYPE_RECT:
@@ -3546,6 +3789,8 @@ RendererCanvasRenderRD::~RendererCanvasRenderRD() {
 
 	material_storage->material_free(default_clip_children_material);
 	material_storage->shader_free(default_clip_children_shader);
+	material_storage->material_free(default_layer_stack_material);
+	material_storage->shader_free(default_layer_stack_shader);
 
 	{
 		if (state.canvas_state_buffer.is_valid()) {

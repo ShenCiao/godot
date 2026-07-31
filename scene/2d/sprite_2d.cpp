@@ -489,7 +489,37 @@ void Sprite2D::_emit_region_rect_enabled() {
 	}
 }
 
+void Sprite2D::set_layer_blend_mode(LayerBlendMode p_blend_mode) {
+	ERR_FAIL_INDEX(p_blend_mode, LAYER_BLEND_MODE_MAX);
+	if (layer_blend_mode == p_blend_mode) {
+		return;
+	}
+	layer_blend_mode = p_blend_mode;
+	RS::get_singleton()->canvas_item_set_layer_blend_mode(get_canvas_item(), RS::CanvasItemLayerBlendMode(layer_blend_mode));
+}
+
+Sprite2D::LayerBlendMode Sprite2D::get_layer_blend_mode() const {
+	return layer_blend_mode;
+}
+
+void Sprite2D::set_clipping_mask(bool p_enabled) {
+	if (clipping_mask == p_enabled) {
+		return;
+	}
+	clipping_mask = p_enabled;
+	RS::get_singleton()->canvas_item_set_clipping_mask(get_canvas_item(), clipping_mask);
+}
+
+bool Sprite2D::is_clipping_mask() const {
+	return clipping_mask;
+}
+
 void Sprite2D::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_layer_blend_mode", "blend_mode"), &Sprite2D::set_layer_blend_mode);
+	ClassDB::bind_method(D_METHOD("get_layer_blend_mode"), &Sprite2D::get_layer_blend_mode);
+	ClassDB::bind_method(D_METHOD("set_clipping_mask", "enabled"), &Sprite2D::set_clipping_mask);
+	ClassDB::bind_method(D_METHOD("is_clipping_mask"), &Sprite2D::is_clipping_mask);
+
 	ClassDB::bind_method(D_METHOD("set_texture", "texture"), &Sprite2D::set_texture);
 	ClassDB::bind_method(D_METHOD("get_texture"), &Sprite2D::get_texture);
 
@@ -533,6 +563,8 @@ void Sprite2D::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("frame_changed"));
 	ADD_SIGNAL(MethodInfo("texture_changed"));
 
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "layer_blend_mode", PROPERTY_HINT_ENUM, "Default,Normal,Add,Multiply"), "set_layer_blend_mode", "get_layer_blend_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "clipping_mask"), "set_clipping_mask", "is_clipping_mask");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "set_texture", "get_texture");
 	ADD_GROUP("Offset", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "centered"), "set_centered", "is_centered");
@@ -549,9 +581,18 @@ void Sprite2D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "region_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_region_enabled", "is_region_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::RECT2, "region_rect"), "set_region_rect", "get_region_rect");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "region_filter_clip_enabled"), "set_region_filter_clip_enabled", "is_region_filter_clip_enabled");
+
+	BIND_ENUM_CONSTANT(LAYER_BLEND_MODE_DEFAULT);
+	BIND_ENUM_CONSTANT(LAYER_BLEND_MODE_NORMAL);
+	BIND_ENUM_CONSTANT(LAYER_BLEND_MODE_ADD);
+	BIND_ENUM_CONSTANT(LAYER_BLEND_MODE_MULTIPLY);
+	BIND_ENUM_CONSTANT(LAYER_BLEND_MODE_MAX);
 }
 
 Sprite2D::Sprite2D() {
+	RS::get_singleton()->canvas_item_set_is_layer(get_canvas_item(), true);
+	RS::get_singleton()->canvas_item_set_layer_blend_mode(get_canvas_item(), RS::CanvasItemLayerBlendMode(layer_blend_mode));
+	RS::get_singleton()->canvas_item_set_clipping_mask(get_canvas_item(), clipping_mask);
 	if (Engine::get_singleton()->is_editor_hint()) {
 		add_user_signal(MethodInfo("_editor_region_rect_enabled"));
 	}

@@ -103,6 +103,14 @@ bool sc_use_lcd() {
 	return ((sc_packed_0() >> 2) & 1U) != 0;
 }
 
+bool sc_layer_premultiply() {
+	return ((sc_packed_0() >> 3) & 1U) != 0;
+}
+
+bool sc_layer_scale_associated_color() {
+	return ((sc_packed_0() >> 4) & 1U) != 0;
+}
+
 // In vulkan, sets should always be ordered using the following logic:
 // Lower Sets: Sets that change format and layout less often
 // Higher sets: Sets that change format and layout very often

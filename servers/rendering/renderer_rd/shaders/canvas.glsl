@@ -372,7 +372,8 @@ layout(location = 8) in vec2 pixel_size_interp;
 
 #endif // USE_ATTRIBUTES
 
-layout(location = 0) out vec4 frag_color;
+layout(location = 0, index = 0) out vec4 frag_color;
+layout(location = 0, index = 1) out vec4 frag_blend;
 
 #ifdef MATERIAL_UNIFORMS_USED
 /* clang-format off */
@@ -657,6 +658,10 @@ void main() {
 		color *= texture(sampler2D(color_texture, texture_sampler), uv);
 	}
 
+	if (sc_layer_scale_associated_color()) {
+		color.rgb *= color_interp.a;
+	}
+
 	uint light_count = read_draw_data_flags & 15u; //max 15 lights
 	bool using_light = ((light_count + canvas_data.directional_light_count) > 0) && sc_use_lighting();
 
@@ -875,5 +880,10 @@ void main() {
 	color.a *= light_only_alpha;
 #endif
 
+	if (sc_layer_premultiply()) {
+		color.rgb *= color.a;
+	}
+
 	frag_color = color;
+	frag_blend = vec4(color.rgb + vec3(1.0 - color.a), color.a);
 }

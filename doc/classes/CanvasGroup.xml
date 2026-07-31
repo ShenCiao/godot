@@ -14,7 +14,7 @@
 		}
 		[/codeblock]
 		The CanvasGroup compositing source uses associated alpha, so its RGB values are already multiplied by alpha. CanvasGroup output is blended back using premultiplied alpha blending.
-		[b]Note:[/b] Drawing commands issued by the [CanvasGroup] owner itself are not supported. Use a [ShaderMaterial] on the [CanvasGroup] to customize how the composited children texture is drawn.
+		[b]Note:[/b] Drawing commands issued by the [CanvasGroup] owner itself are not supported. Place drawable content in child [CanvasItem] nodes, and use a [ShaderMaterial] on the [CanvasGroup] to customize how the composited children texture is drawn.
 		[b]Note:[/b] When using a RenderingDevice-based renderer, [CanvasGroup] nodes can be nested. Nested [CanvasGroup] nodes are rendered from the innermost group outward, similar to nested layer groups in image editing applications. This is not supported by the Compatibility renderer.
 		[b]Note:[/b] Since [CanvasGroup] and [member CanvasItem.clip_children] both utilize offscreen buffers, children of a [CanvasGroup] who have their [member CanvasItem.clip_children] set to anything other than [constant CanvasItem.CLIP_CHILDREN_DISABLED] will not function correctly.
 	</description>
@@ -22,13 +22,36 @@
 	</tutorials>
 	<members>
 		<member name="clear_margin" type="float" setter="set_clear_margin" getter="get_clear_margin" default="10.0">
-			Sets the size of the margin used to expand the clearing rect of this [CanvasGroup]. This expands the area of the backbuffer that will be used by the [CanvasGroup]. A smaller margin will reduce the area of the backbuffer used which can increase performance, however if [member use_mipmaps] is enabled, a small margin may result in mipmap errors at the edge of the [CanvasGroup]. Accordingly, this should be left as small as possible, but should be increased if artifacts appear along the edges of the canvas group.
+			Sets the size of the margin used to expand the clearing rect of this [CanvasGroup]. This expands the area of the backbuffer that will be used by the [CanvasGroup]. A smaller margin reduces the backbuffer area and can improve performance. Keep this as small as possible, but increase it if custom effects produce artifacts along the edges of the canvas group.
+		</member>
+		<member name="clipping_mask" type="bool" setter="set_clipping_mask" getter="is_clipping_mask" default="false">
+			If [code]true[/code], this Layer uses the nearest lower sibling Layer that does not have [member clipping_mask] enabled as its Clipping Base. The Layer changes color only within the Base's resulting alpha, and cannot change the Clipping Stack's alpha. An orphaned clipped Layer renders with zero coverage.
 		</member>
 		<member name="fit_margin" type="float" setter="set_fit_margin" getter="get_fit_margin" default="10.0">
 			Sets the size of a margin used to expand the drawable rect of this [CanvasGroup]. The size of the [CanvasGroup] is determined by fitting a rect around its children then expanding that rect by [member fit_margin]. This increases both the backbuffer area used and the area covered by the [CanvasGroup] both of which can reduce performance. This should be kept as small as possible and should only be expanded when an increased size is needed (e.g. for custom shader effects).
 		</member>
+		<member name="layer_blend_mode" type="int" setter="set_layer_blend_mode" getter="get_layer_blend_mode" enum="CanvasGroup.LayerBlendMode" default="0">
+			Selects how this Layer's combined result is composited with lower sibling Layers. [constant LAYER_BLEND_MODE_DEFAULT] uses the effective canvas shader's [code]render_mode blend_*[/code] declaration.
+		</member>
 		<member name="use_mipmaps" type="bool" setter="set_use_mipmaps" getter="is_using_mipmaps" default="false">
-			If [code]true[/code], calculates mipmaps for the CanvasGroup compositing source before drawing the [CanvasGroup] so that mipmaps can be used in a custom [ShaderMaterial] attached to the [CanvasGroup]. CanvasGroup mipmap sampling uses a linear mipmap filter even when the CanvasItem texture filter is nearest. Generating mipmaps has a performance cost so this should not be enabled unless required.
+			Retained for scene and script compatibility. The property value is serialized, but mipmap generation is disabled and setting this property to [code]true[/code] emits a warning.
 		</member>
 	</members>
+	<constants>
+		<constant name="LAYER_BLEND_MODE_DEFAULT" value="0" enum="LayerBlendMode">
+			Uses the effective canvas shader's blend declaration. The default canvas shader uses Normal blending.
+		</constant>
+		<constant name="LAYER_BLEND_MODE_NORMAL" value="1" enum="LayerBlendMode">
+			Uses associated-alpha source-over blending.
+		</constant>
+		<constant name="LAYER_BLEND_MODE_ADD" value="2" enum="LayerBlendMode">
+			Adds the associated source color to the destination while preserving source-over alpha coverage.
+		</constant>
+		<constant name="LAYER_BLEND_MODE_MULTIPLY" value="3" enum="LayerBlendMode">
+			Multiplies source and destination colors with correct partially transparent edge behavior.
+		</constant>
+		<constant name="LAYER_BLEND_MODE_MAX" value="4" enum="LayerBlendMode">
+			Represents the size of the [enum LayerBlendMode] enum.
+		</constant>
+	</constants>
 </class>

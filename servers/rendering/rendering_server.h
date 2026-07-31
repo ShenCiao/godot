@@ -1626,6 +1626,18 @@ public:
 
 	virtual void canvas_item_set_visibility_notifier(RID p_item, bool p_enable, const Rect2 &p_area, const Callable &p_enter_callbable, const Callable &p_exit_callable) = 0;
 
+	enum CanvasItemLayerBlendMode {
+		CANVAS_ITEM_LAYER_BLEND_MODE_DEFAULT,
+		CANVAS_ITEM_LAYER_BLEND_MODE_NORMAL,
+		CANVAS_ITEM_LAYER_BLEND_MODE_ADD,
+		CANVAS_ITEM_LAYER_BLEND_MODE_MULTIPLY,
+		CANVAS_ITEM_LAYER_BLEND_MODE_MAX,
+	};
+
+	virtual void canvas_item_set_is_layer(RID p_item, bool p_is_layer) = 0;
+	virtual void canvas_item_set_layer_blend_mode(RID p_item, CanvasItemLayerBlendMode p_blend_mode) = 0;
+	virtual void canvas_item_set_clipping_mask(RID p_item, bool p_enabled) = 0;
+
 	enum CanvasGroupMode {
 		CANVAS_GROUP_MODE_DISABLED,
 		CANVAS_GROUP_MODE_CLIP_ONLY, // Photoshop's clipping mask but clip on children.
@@ -2014,6 +2026,7 @@ VARIANT_ENUM_CAST(RenderingServer::VisibilityRangeFadeMode);
 VARIANT_ENUM_CAST(RenderingServer::NinePatchAxisMode);
 VARIANT_ENUM_CAST(RenderingServer::CanvasItemTextureFilter);
 VARIANT_ENUM_CAST(RenderingServer::CanvasItemTextureRepeat);
+VARIANT_ENUM_CAST(RenderingServer::CanvasItemLayerBlendMode);
 VARIANT_ENUM_CAST(RenderingServer::CanvasGroupMode);
 VARIANT_ENUM_CAST(RenderingServer::CanvasLightMode);
 VARIANT_ENUM_CAST(RenderingServer::CanvasLightBlendMode);

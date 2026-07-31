@@ -49,6 +49,15 @@ public:
 		CANVAS_RECT_LCD = 256,
 	};
 
+	enum ResolvedLayerBlendMode {
+		RESOLVED_LAYER_BLEND_NONE,
+		RESOLVED_LAYER_BLEND_NORMAL,
+		RESOLVED_LAYER_BLEND_ADD,
+		RESOLVED_LAYER_BLEND_SUBTRACT,
+		RESOLVED_LAYER_BLEND_MULTIPLY,
+		RESOLVED_LAYER_BLEND_REPLACE,
+	};
+
 	struct Light {
 		bool enabled : 1;
 		bool on_interpolate_transform_list : 1;
@@ -333,6 +342,20 @@ public:
 		};
 
 		CanvasGroup *canvas_group = nullptr;
+		RS::CanvasItemLayerBlendMode layer_blend_mode = RS::CANVAS_ITEM_LAYER_BLEND_MODE_DEFAULT;
+		bool is_layer = false;
+		bool clipping_mask = false;
+		enum LayerDrawMode {
+			LAYER_DRAW_MODE_DIRECT,
+			LAYER_DRAW_MODE_CLIPPING_BASE,
+			LAYER_DRAW_MODE_CLIPPED,
+			LAYER_DRAW_MODE_SKIP,
+			LAYER_DRAW_MODE_STACK_COMPOSITE,
+		};
+		LayerDrawMode layer_draw_mode = LAYER_DRAW_MODE_DIRECT;
+		ResolvedLayerBlendMode layer_composite_blend_mode = RESOLVED_LAYER_BLEND_NONE;
+		Vector<Item *> layer_stack_starts;
+		Vector<Item *> layer_stack_ends;
 		bool use_canvas_group = false;
 		RID canvas_group_texture;
 		Size2i canvas_group_texture_size;

@@ -502,6 +502,14 @@
 				[b]Note:[/b] The equivalent node functionality is found in [member Label.clip_text], [RichTextLabel] (always enabled) and more.
 			</description>
 		</method>
+		<method name="canvas_item_set_clipping_mask">
+			<return type="void" />
+			<param index="0" name="item" type="RID" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				If [param enabled] is [code]true[/code], marks the Layer canvas item as a Clipped Layer. Its Clipping Base is inferred from direct sibling Layer order. This is independent of [constant CANVAS_GROUP_MODE_CLIP_ONLY].
+			</description>
+		</method>
 		<method name="canvas_item_set_copy_to_backbuffer">
 			<return type="void" />
 			<param index="0" name="item" type="RID" />
@@ -575,6 +583,14 @@
 			<param index="1" name="interpolated" type="bool" />
 			<description>
 				If [param interpolated] is [code]true[/code], turns on physics interpolation for the canvas item.
+			</description>
+		</method>
+		<method name="canvas_item_set_layer_blend_mode">
+			<return type="void" />
+			<param index="0" name="item" type="RID" />
+			<param index="1" name="blend_mode" type="int" enum="RenderingServer.CanvasItemLayerBlendMode" />
+			<description>
+				Sets the runtime Layer blend override for the canvas item. [constant CANVAS_ITEM_LAYER_BLEND_MODE_DEFAULT] uses the effective canvas shader's blend declaration.
 			</description>
 		</method>
 		<method name="canvas_item_set_light_mask">
@@ -5820,6 +5836,21 @@
 		</constant>
 		<constant name="CANVAS_ITEM_TEXTURE_REPEAT_MAX" value="4" enum="CanvasItemTextureRepeat">
 			Max value for [enum CanvasItemTextureRepeat] enum.
+		</constant>
+		<constant name="CANVAS_ITEM_LAYER_BLEND_MODE_DEFAULT" value="0" enum="CanvasItemLayerBlendMode">
+			Uses the effective canvas shader's blend declaration.
+		</constant>
+		<constant name="CANVAS_ITEM_LAYER_BLEND_MODE_NORMAL" value="1" enum="CanvasItemLayerBlendMode">
+			Uses associated-alpha source-over blending.
+		</constant>
+		<constant name="CANVAS_ITEM_LAYER_BLEND_MODE_ADD" value="2" enum="CanvasItemLayerBlendMode">
+			Uses associated-alpha additive blending.
+		</constant>
+		<constant name="CANVAS_ITEM_LAYER_BLEND_MODE_MULTIPLY" value="3" enum="CanvasItemLayerBlendMode">
+			Uses associated-alpha Multiply blending.
+		</constant>
+		<constant name="CANVAS_ITEM_LAYER_BLEND_MODE_MAX" value="4" enum="CanvasItemLayerBlendMode">
+			Maximum value for the [enum CanvasItemLayerBlendMode] enum.
 		</constant>
 		<constant name="CANVAS_GROUP_MODE_DISABLED" value="0" enum="CanvasGroupMode">
 			Child draws over parent and is not clipped.

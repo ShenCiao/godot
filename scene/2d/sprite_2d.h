@@ -36,6 +36,17 @@
 class Sprite2D : public Node2D {
 	GDCLASS(Sprite2D, Node2D);
 
+public:
+	enum LayerBlendMode {
+		LAYER_BLEND_MODE_DEFAULT = RenderingServer::CANVAS_ITEM_LAYER_BLEND_MODE_DEFAULT,
+		LAYER_BLEND_MODE_NORMAL = RenderingServer::CANVAS_ITEM_LAYER_BLEND_MODE_NORMAL,
+		LAYER_BLEND_MODE_ADD = RenderingServer::CANVAS_ITEM_LAYER_BLEND_MODE_ADD,
+		LAYER_BLEND_MODE_MULTIPLY = RenderingServer::CANVAS_ITEM_LAYER_BLEND_MODE_MULTIPLY,
+		LAYER_BLEND_MODE_MAX = RenderingServer::CANVAS_ITEM_LAYER_BLEND_MODE_MAX,
+	};
+
+private:
+
 	Ref<Texture2D> texture;
 
 #ifdef TOOLS_ENABLED
@@ -55,6 +66,8 @@ class Sprite2D : public Node2D {
 
 	int vframes = 1;
 	int hframes = 1;
+	LayerBlendMode layer_blend_mode = LAYER_BLEND_MODE_DEFAULT;
+	bool clipping_mask = false;
 
 	void _get_rects(Rect2 &r_src_rect, Rect2 &r_dst_rect, bool &r_filter_clip_enabled) const;
 	Point2 _get_rect_offset(const Size2i &p_size) const;
@@ -132,8 +145,15 @@ public:
 	void set_hframes(int p_amount);
 	int get_hframes() const;
 
+	void set_layer_blend_mode(LayerBlendMode p_blend_mode);
+	LayerBlendMode get_layer_blend_mode() const;
+	void set_clipping_mask(bool p_enabled);
+	bool is_clipping_mask() const;
+
 	Rect2 get_rect() const;
 	virtual Rect2 get_anchorable_rect() const override;
 
 	Sprite2D();
 };
+
+VARIANT_ENUM_CAST(Sprite2D::LayerBlendMode);
