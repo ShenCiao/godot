@@ -6,6 +6,7 @@
 
 #include "arrangement_2d.h"
 #include "centerline_vectorizer.h"
+#include "constrained_triangulation_2d.h"
 
 #include "core/object/class_db.h"
 
@@ -16,6 +17,7 @@ void initialize_arrangement_2d_module(ModuleInitializationLevel p_level) {
 
 	GDREGISTER_CLASS(Arrangement2D);
 	GDREGISTER_CLASS(CenterlineVectorizer);
+	GDREGISTER_CLASS(ConstrainedTriangulation2D);
 }
 
 void uninitialize_arrangement_2d_module(ModuleInitializationLevel p_level) {
