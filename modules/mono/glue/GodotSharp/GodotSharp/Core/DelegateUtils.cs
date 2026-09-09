@@ -131,19 +131,11 @@ namespace Godot
                 }
             }
 
-            if (TrySerializeSingleDelegate(@delegate, out byte[]? buffer))
-            {
-                serializedData.Add((Span<byte>)buffer);
-                return true;
-            }
-
-            return false;
+            return TrySerializeSingleDelegate(@delegate, serializedData);
         }
 
-        private static bool TrySerializeSingleDelegate(Delegate @delegate, [MaybeNullWhen(false)] out byte[] buffer)
+        private static bool TrySerializeSingleDelegate(Delegate @delegate, Collections.Array serializedData)
         {
-            buffer = null;
-
             object? target = @delegate.Target;
 
             switch (target)
@@ -160,7 +152,7 @@ namespace Godot
                         if (!TrySerializeMethodInfo(writer, @delegate.Method))
                             return false;
 
-                        buffer = stream.ToArray();
+                        serializedData.Add((Span<byte>)stream.ToArray());
                         return true;
                     }
                 }
@@ -184,7 +176,7 @@ namespace Godot
                         if (!TrySerializeMethodInfo(writer, @delegate.Method))
                             return false;
 
-                        buffer = stream.ToArray();
+                        serializedData.Add((Span<byte>)stream.ToArray());
                         return true;
                     }
                 }
@@ -198,6 +190,7 @@ namespace Godot
 
                         using (var stream = new MemoryStream())
                         using (var writer = new BinaryWriter(stream))
+                        using (var capturedValues = new Collections.Array())
                         {
                             writer.Write((ulong)TargetKind.CompilerGenerated);
                             SerializeType(writer, targetType);
@@ -220,23 +213,26 @@ namespace Godot
                                 if (variantType == Variant.Type.Nil)
                                     return false;
 
-                                static byte[] VarToBytes(in godot_variant var)
-                                {
-                                    NativeFuncs.godotsharp_var_to_bytes(var, godot_bool.True, out var varBytes);
-                                    using (varBytes)
-                                        return Marshaling.ConvertNativePackedByteArrayToSystemArray(varBytes);
-                                }
-
                                 writer.Write(field.Name);
 
                                 var fieldValue = field.GetValue(target);
-                                using var fieldValueVariant = RuntimeTypeConversionHelper.ConvertToVariant(fieldValue);
-                                byte[] valueBuffer = VarToBytes(fieldValueVariant);
-                                writer.Write(valueBuffer.Length);
-                                writer.Write(valueBuffer);
+                                if (fieldValue is GodotObject capturedObject && !GodotObject.IsInstanceValid(capturedObject))
+                                    return false;
+
+                                using var fieldValueVariant = Variant.CreateTakingOwnershipOfDisposableValue(
+                                    RuntimeTypeConversionHelper.ConvertToVariant(fieldValue));
+                                capturedValues.Add(fieldValueVariant);
                             }
 
-                            buffer = stream.ToArray();
+                            // Native Variants preserve object identity, including internal classes such as
+                            // SpinBoxLineEdit, and keep RefCounted captures alive while assemblies unload.
+                            // Only method/type metadata needs binary serialization.
+                            using var serializedDelegate = new Collections.Dictionary
+                            {
+                                ["metadata"] = stream.ToArray(),
+                                ["captures"] = capturedValues,
+                            };
+                            serializedData.Add(serializedDelegate);
                             return true;
                         }
                     }
@@ -381,7 +377,7 @@ namespace Godot
                 if (elem is Collections.Array multiCastData)
                     return TryDeserializeDelegate(multiCastData, out @delegate);
 
-                return TryDeserializeSingleDelegate((byte[])elem, out @delegate);
+                return TryDeserializeSingleDelegate(elem, out @delegate);
             }
 
             var delegates = new List<Delegate>(serializedData.Count);
@@ -400,7 +396,7 @@ namespace Godot
                 }
                 else
                 {
-                    if (TryDeserializeSingleDelegate((byte[])elem, out Delegate? oneDelegate))
+                    if (TryDeserializeSingleDelegate(elem, out Delegate? oneDelegate))
                         delegates.Add(oneDelegate);
                 }
             }
@@ -412,10 +408,23 @@ namespace Godot
             return true;
         }
 
-        private static bool TryDeserializeSingleDelegate(byte[] buffer, [MaybeNullWhen(false)] out Delegate @delegate)
+        private static bool TryDeserializeSingleDelegate(object serializedData, [MaybeNullWhen(false)] out Delegate @delegate)
         {
             @delegate = null;
 
+            byte[] buffer;
+            Collections.Array? capturedValues = null;
+            if (serializedData is Collections.Dictionary serializedDelegate)
+            {
+                buffer = serializedDelegate["metadata"].AsByteArray();
+                capturedValues = serializedDelegate["captures"].AsGodotArray();
+            }
+            else
+            {
+                buffer = (byte[])serializedData;
+            }
+
+            using (capturedValues)
             using (var stream = new MemoryStream(buffer, writable: false))
             using (var reader = new BinaryReader(stream))
             {
@@ -481,17 +490,20 @@ namespace Godot
                         for (int i = 0; i < fieldCount; i++)
                         {
                             string name = reader.ReadString();
-                            int valueBufferLength = reader.ReadInt32();
-                            byte[] valueBuffer = reader.ReadBytes(valueBufferLength);
-
                             FieldInfo? fieldInfo = targetType.GetField(name,
                                 BindingFlags.Instance | BindingFlags.Public);
 
                             if (fieldInfo != null)
                             {
-                                var variantValue = GD.BytesToVarWithObjects(valueBuffer);
+                                using var variantValue = capturedValues![i];
                                 object? managedValue = RuntimeTypeConversionHelper.ConvertToObjectOfType(
                                     (godot_variant)variantValue.NativeVar, fieldInfo.FieldType);
+                                // A non-RefCounted capture may have been freed while reloading.
+                                // A deliberately null capture has no instance ID and remains valid.
+                                if (variantValue.VariantType == Variant.Type.Object &&
+                                    ((godot_variant)variantValue.NativeVar).ObjectId != 0 && managedValue == null)
+                                    return false;
+
                                 fieldInfo.SetValue(recreatedTarget, managedValue);
                             }
                         }
@@ -713,7 +725,7 @@ namespace Godot
                     case Rid[] ridArray:
                         return VariantUtils.CreateFrom(ridArray);
                     case GodotObject[] godotObjectArray:
-                        return VariantUtils.CreateFrom(godotObjectArray);
+                        return VariantUtils.CreateFromSystemArrayOfGodotObject(godotObjectArray);
                     case StringName stringName:
                         return VariantUtils.CreateFrom(stringName);
                     case NodePath nodePath:

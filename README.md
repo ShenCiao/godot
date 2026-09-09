@@ -10,6 +10,7 @@ Main changes:
 - Spinbox add max display decimals
 - Fix dialog placement on multi-monitor setups: `Window.initial_position` is applied only the first time a `Window` instance is shown, reopening it preserves the user's latest position and size, and an explicit `popup(Rect2i)` still takes precedence. Off-screen fallback centering now also respects each display's virtual desktop origin.
 - Runtime `FileDialog` nodes always use the operating system's native file dialog.
+- Preserve captured Godot object references across C# editor assembly reloads, including internal controls such as `SpinBoxLineEdit`. See [C# delegate captures during editor reload](#c-delegate-captures-during-editor-reload).
 
 ## C# development
 
@@ -69,6 +70,24 @@ A manual run of the `Ciallo Godot Release` workflow publishes the current `origi
 Published editor builds select the `.csproj` package pin and clean local editor state when opening the
 project. Local assemblies remain per-machine development artifacts; team dependencies are published by
 the `Ciallo Godot Release` workflow.
+
+### C# delegate captures during editor reload
+
+C# closures preserve captured Godot object identity across editor assembly reloads. `DelegateUtils`
+stores captured values in native Variant containers, which also keep captured `RefCounted` objects
+alive while the project assembly unloads. Supported captures include internal objects such as
+`SpinBox.GetLineEdit()` (`SpinBoxLineEdit`), nested Godot arrays and dictionaries, and C# arrays of
+Godot objects. Method and type metadata remain binary data in this in-memory reload snapshot.
+
+A freed direct Godot object capture causes that delegate to be rejected during saving or restoration.
+Deliberately null captures remain valid, and unsupported managed capture types are rejected. This
+avoids the failed object-encoding and subsequent empty-buffer decoding errors during closure reload.
+
+**Remaining signal limitation:** `ManagedCallable` hashes can still change across assembly reloads.
+An existing C# event subscription can continue firing while `IsConnected` returns `false` and
+`-=` or `Disconnect` cannot remove it. Tool scripts that require reliable connection checks and
+disconnection across reloads should retain named `Callable` connections, such as
+`new Callable(this, MethodName.OnChanged)`, together with their lifecycle and idempotent binding logic.
 
 ### Publishing an API change
 
