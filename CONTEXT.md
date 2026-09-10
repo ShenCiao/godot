@@ -88,7 +88,7 @@ Native dialog availability is required. An unavailable native backend completes 
 
 ## Rendering
 
-Rendering work in this repository targets the RD renderer path; GLES3 compatibility does not need to be preserved.
+Rendering work in this repository targets the RD renderer path. The Compatibility/GLES3 renderer is permanently outside the product support boundary; new rendering features must not add fallbacks or preserve Compatibility behavior.
 
 Canvas item Z indexing is intentionally narrowed to 256 global buckets (`-128` to `127`) for this custom build for less memory allocation for nested canvas groups.
 
