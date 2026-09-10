@@ -129,10 +129,14 @@ void CheckBox::_notification(int p_what) {
 			}
 
 			Vector2 ofs;
+			const float left_margin = _is_align_to_largest_stylebox() ? _get_largest_stylebox_margin(SIDE_LEFT) :
+					theme_cache.normal_style->get_margin(SIDE_LEFT);
+			const float right_margin = _is_align_to_largest_stylebox() ? _get_largest_stylebox_margin(SIDE_RIGHT) :
+					theme_cache.normal_style->get_margin(SIDE_RIGHT);
 			if (is_layout_rtl()) {
-				ofs.x = get_size().x - theme_cache.normal_style->get_margin(SIDE_RIGHT) - get_icon_size().width;
+				ofs.x = get_size().x - right_margin - get_icon_size().width;
 			} else {
-				ofs.x = theme_cache.normal_style->get_margin(SIDE_LEFT);
+				ofs.x = left_margin;
 			}
 			ofs.y = int((get_size().height - get_icon_size().height) / 2) + theme_cache.check_v_offset;
 

@@ -11,6 +11,7 @@ Main changes:
 - Fix dialog placement on multi-monitor setups: `Window.initial_position` is applied only the first time a `Window` instance is shown, reopening it preserves the user's latest position and size, and an explicit `popup(Rect2i)` still takes precedence. Off-screen fallback centering now also respects each display's virtual desktop origin.
 - Runtime `FileDialog` nodes always use the operating system's native file dialog.
 - Preserve captured Godot object references across C# editor assembly reloads, including internal controls such as `SpinBoxLineEdit`. See [C# delegate captures during editor reload](#c-delegate-captures-during-editor-reload).
+- Align `CheckBox` and `CheckButton` icons with the largest StyleBox margins when `align_to_largest_stylebox` is enabled. This keeps icon placement stable across normal, hover, and pressed states; Ciallo enables the constant globally for consistent layer-button layout.
 
 ## C# development
 

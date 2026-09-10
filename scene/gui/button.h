@@ -117,6 +117,8 @@ protected:
 	Size2 _fit_icon_size(const Size2 &p_size) const;
 	Ref<StyleBox> _get_current_stylebox() const;
 	Size2 _get_largest_stylebox_size() const;
+	float _get_largest_stylebox_margin(Side p_side) const;
+	bool _is_align_to_largest_stylebox() const;
 	void _notification(int p_what);
 	static void _bind_methods();
 

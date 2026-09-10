@@ -98,6 +98,24 @@ Size2 Button::_get_largest_stylebox_size() const {
 	return theme_cache.max_style_size;
 }
 
+float Button::_get_largest_stylebox_margin(Side p_side) const {
+	switch (p_side) {
+		case SIDE_LEFT:
+			return theme_cache.style_margin_left;
+		case SIDE_TOP:
+			return theme_cache.style_margin_top;
+		case SIDE_RIGHT:
+			return theme_cache.style_margin_right;
+		case SIDE_BOTTOM:
+			return theme_cache.style_margin_bottom;
+	}
+	return 0.0;
+}
+
+bool Button::_is_align_to_largest_stylebox() const {
+	return theme_cache.align_to_largest_stylebox;
+}
+
 Ref<StyleBox> Button::_get_current_stylebox() const {
 	Ref<StyleBox> stylebox = theme_cache.normal;
 	const bool rtl = is_layout_rtl();
