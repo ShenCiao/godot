@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="Layer2D" inherits="Node2D" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Represents a Ciallo compositing layer and enables offscreen rendering only when required.
+	</brief_description>
+	<description>
+		A [Layer2D] can render as an ordinary [Node2D] when its settings do not require a separate layer source. Settings such as layer opacity, non-default blending, clipping masks, a material on the layer, or [member composite_mode] set to [constant COMPOSITE_MODE_ALWAYS] enable the existing transparent CanvasGroup rendering path.
+		[b]Note:[/b] This custom node is intended for the RD renderer path. The Compatibility renderer is outside the supported product boundary.
+	</description>
+	<members>
+		<member name="clear_margin" type="float" setter="set_clear_margin" getter="get_clear_margin" default="10.0">
+			Sets the margin used to expand the transparent composite clearing rectangle.
+		</member>
+		<member name="clipping_mask" type="bool" setter="set_clipping_mask" getter="is_clipping_mask" default="false">
+			If [code]true[/code], marks this layer as a clipped layer whose clipping base is inferred from lower sibling layers.
+		</member>
+		<member name="composite_mode" type="int" setter="set_composite_mode" getter="get_composite_mode" enum="Layer2D.CompositeMode" default="0">
+			Controls whether the layer selects compositing automatically or always uses the transparent CanvasGroup path.
+		</member>
+		<member name="fit_margin" type="float" setter="set_fit_margin" getter="get_fit_margin" default="10.0">
+			Sets the margin used to expand the drawable rectangle of a composited layer.
+		</member>
+		<member name="layer_blend_mode" type="int" setter="set_layer_blend_mode" getter="get_layer_blend_mode" enum="Layer2D.LayerBlendMode" default="0">
+			Selects the runtime layer blend override. The default selection preserves the effective canvas shader blend declaration.
+		</member>
+	</members>
+	<methods>
+		<method name="is_composite_active" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when this layer currently uses the transparent composite path.
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="LAYER_BLEND_MODE_DEFAULT" value="0" enum="LayerBlendMode">
+			Uses the effective canvas shader's blend declaration.
+		</constant>
+		<constant name="LAYER_BLEND_MODE_NORMAL" value="1" enum="LayerBlendMode">
+			Uses associated-alpha source-over blending.
+		</constant>
+		<constant name="LAYER_BLEND_MODE_ADD" value="2" enum="LayerBlendMode">
+			Adds the associated source color to the destination.
+		</constant>
+		<constant name="LAYER_BLEND_MODE_MULTIPLY" value="3" enum="LayerBlendMode">
+			Multiplies source and destination colors with associated-alpha edge handling.
+		</constant>
+		<constant name="LAYER_BLEND_MODE_MAX" value="4" enum="LayerBlendMode">
+			Represents the size of the [enum LayerBlendMode] enum.
+		</constant>
+		<constant name="COMPOSITE_MODE_AUTO" value="0" enum="CompositeMode">
+			Selects direct or composite rendering from the layer's current state.
+		</constant>
+		<constant name="COMPOSITE_MODE_ALWAYS" value="1" enum="CompositeMode">
+			Always uses the transparent composite path.
+		</constant>
+		<constant name="COMPOSITE_MODE_MAX" value="2" enum="CompositeMode">
+			Represents the size of the [enum CompositeMode] enum.
+		</constant>
+	</constants>
+</class>

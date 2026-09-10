@@ -10,8 +10,9 @@ Features:
 - Touch as individual event, separated from mouse event on Windows
 - Add CGAL Arrangement2D
 - Add `INSTANCE_TRANSFORM` canvas_item vertex shader builtin for reading the current MultiMesh instance transform. When a canvas_item shader reads `INSTANCE_TRANSFORM`, the 2D MultiMesh instance transform is not folded into `MODEL_MATRIX`; the shader owns how to apply or repurpose it. (This tortured me a whole freaking year.)
-- CanvasGroup/Sprite2D layer system with nested layers, layer opacity, runtime Normal/Add/Multiply blend modes, sibling clipping masks, and custom shaders.
-(Note: This part is almost fully vibed. Although I know what is modified in rendering, I'm not capable to maintain/modify code manually)
+- Layer2D/Sprite2D layer system with nested layers, lazy direct rendering for default Layer2D nodes, automatic transparent composition for opacity, non-default blend modes, clipping masks, layer materials, or explicit always-composite mode, plus custom shaders. 
+
+The layer rendering contract is documented in [docs/rendering/layer-system.md](docs/rendering/layer-system.md). The architectural decision behind the Ciallo scene-facing `Layer2D` node is recorded in [ADR 0002](docs/adr/0002-layer2d-rendering-policy.md).
 - Spinbox add max display decimals
 - Runtime `FileDialog` nodes always use the operating system's native file dialog.
 

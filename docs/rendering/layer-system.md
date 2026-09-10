@@ -6,9 +6,9 @@ Layer rendering does not use mipmaps. `CanvasGroup.use_mipmaps` is retained for 
 
 ## Layer Opacity
 
-`self_modulate.a` is the Layer Opacity for both `CanvasGroup` and `Sprite2D` Layers. It is supplied through the standard CanvasItem `COLOR` input. The default shader honors it, while a custom shader may replace `COLOR` and alter or bypass the resulting opacity without a separate opt-out mode.
+`self_modulate.a` is the Layer Opacity for composited `Layer2D` and `Sprite2D` Layers. It is supplied through the standard CanvasItem `COLOR` input. The default shader honors it, while a custom shader may replace `COLOR` and alter or bypass the resulting opacity without a separate opt-out mode. An automatic `Layer2D` enters its compositing path when this value is not fully opaque.
 
-`modulate` retains ordinary inherited CanvasItem modulation and is not interpreted as Layer Opacity. Supported Node2D Layer rendering requires `CanvasGroup.modulate` to remain `Color(1, 1, 1, 1)`; other values are not validated or corrected and have undefined behavior. This restriction does not apply to `self_modulate` or ordinary Control GUI rendering.
+`modulate` retains ordinary inherited CanvasItem modulation and is not interpreted as Layer Opacity. It does not by itself make an automatic `Layer2D` enter the compositing path. Use `self_modulate` when the opacity must apply to the complete composited layer result.
 
 ## Blend Selection
 
@@ -44,11 +44,11 @@ Multiply uses a dual-source fragment output. The secondary RGB output is `Cs + (
 
 ## Scene API
 
-`Sprite2D` and `CanvasGroup` each expose `layer_blend_mode` directly, with `set_layer_blend_mode()` and `get_layer_blend_mode()`. The property is not placed in an additional Inspector group. Each class exposes its own `LayerBlendMode` enum aliases backed by the same `RenderingServer::CanvasItemLayerBlendMode` values.
+`Sprite2D` and `Layer2D` each expose `layer_blend_mode` directly, with `set_layer_blend_mode()` and `get_layer_blend_mode()`. The property is not placed in an additional Inspector group. Each class exposes its own `LayerBlendMode` enum aliases backed by the same `RenderingServer::CanvasItemLayerBlendMode` values. `CanvasGroup` remains the explicit offscreen container and does not expose Layer properties.
 
 The low-level API is `RenderingServer.canvas_item_set_layer_blend_mode(item, mode)`. The renderer stores the selected mode once on the canvas item. Other `CanvasItem` types do not expose the scene-level Layer Blend Mode API.
 
-`Sprite2D` and `CanvasGroup` also expose the direct boolean property `clipping_mask`, with `set_clipping_mask()` and `is_clipping_mask()`. It defaults to `false`. The low-level API is `RenderingServer.canvas_item_set_clipping_mask(item, enabled)`. A Clipping Base is inferred from direct sibling Layer order and has no separate property.
+`Sprite2D` and `Layer2D` also expose the direct boolean property `clipping_mask`, with `set_clipping_mask()` and `is_clipping_mask()`. It defaults to `false`. The low-level API is `RenderingServer.canvas_item_set_clipping_mask(item, enabled)`. A Clipping Base is inferred from direct sibling Layer order and has no separate property.
 
 The Layer Clipping Mask API is independent of `RenderingServer::CANVAS_GROUP_MODE_CLIP_ONLY`.
 
@@ -58,7 +58,7 @@ The Layer compositor receives every Layer Source in associated-alpha form.
 
 `Sprite2D` shaders retain ordinary Godot straight-alpha `COLOR` semantics. After custom fragment code, the renderer premultiplies the final RGB by the final alpha before supplying the result to the Layer compositor. A `Sprite2D` shader that declares `render_mode blend_premul_alpha` is treated as already producing associated color and is not premultiplied again.
 
-`CanvasGroup` shaders retain their associated-alpha `COLOR` contract and are not premultiplied again. A runtime Layer Blend Mode override changes only the blend equation; it never changes the shader-facing alpha representation or the required normalization.
+`CanvasGroup` and composited `Layer2D` shaders retain their associated-alpha `COLOR` contract and are not premultiplied again. A runtime Layer Blend Mode override changes only the blend equation; it never changes the shader-facing alpha representation or the required normalization.
 
 A `CanvasGroup` custom shader reads the resolved Layer Source through `TEXTURE` and `UV`. `UV` describes the group draw rect even when the scratch texture uses full render-target dimensions. `hint_screen_texture` retains ordinary CanvasItem screen/backbuffer semantics and never aliases the Layer Source.
 
@@ -79,9 +79,9 @@ Ao = Ad
 
 ## Nested Clipping Stacks
 
-A Clipping Stack contains only direct sibling Layers. It never selects a Base across a `CanvasGroup` boundary. A Composite `CanvasGroup` completely resolves its child Layers and their Clipping Stacks into one Layer Source before that source participates in the parent's Layer Order or Clipping Stack.
+A Clipping Stack contains only direct sibling Layers. It never selects a Base across a `CanvasGroup` boundary. A `CanvasGroup` completely resolves its child Layers and their Clipping Stacks into one Layer Source before that source participates in the parent's Layer Order or Clipping Stack.
 
-If the `CanvasGroup` is a Clipped Layer, the outer Base coverage constrains the group's entire resolved source. If the `CanvasGroup` is a Clipping Base, the resolved source's final alpha becomes the outer stack's Clipping Coverage.
+If an active `Layer2D` is a Clipped Layer, the outer Base coverage constrains the layer's entire resolved source. If an active `Layer2D` is a Clipping Base, the resolved source's final alpha becomes the outer stack's Clipping Coverage.
 
 Sequential Clipping Stacks at the same nesting depth reuse one full-target scratch texture. Each simultaneously nested stack depth requires another scratch texture.
 
@@ -89,26 +89,22 @@ The Base is drawn into a transparent scratch target with Normal composition. Cli
 
 ## Content Ownership
 
-`CanvasGroup` Layer content is rendered through the existing child `CanvasItem` traversal using ordinary canvas rendering, including content materials and internal blending. Direct `Node2D` children determine Layer classification; `Control` draws may contribute to the source without affecting that classification. The `CanvasGroup` owner issues no drawing commands and carries the Layer's composition properties and material.
+Composited `Layer2D` and `CanvasGroup` content is rendered through the existing child `CanvasItem` traversal using ordinary canvas rendering, including content materials and internal blending. `Layer2D` itself issues no drawing commands; its children provide the source while the node carries the composition properties and optional material.
 
-A valid Leaf `CanvasGroup` combines all of its Layer Content into one Layer Source. The CanvasGroup's Layer Opacity, Layer Blend Mode, and clipping relationship apply to that combined result rather than to individual content items.
+The `CanvasGroup` owner combines all of its child content into one offscreen source. `Layer2D` properties apply to the complete result rather than to individual child content items when the node is composited.
 
 ## Layer Classification
 
 `Sprite2D` nodes are always Leaf Layers. A `Sprite2D` Layer Source is the node's own draw, not its descendant subtree. Descendant `Node2D` nodes are permitted in the scene tree, but their ordering, opacity, blending, and clipping relationships are outside the supported Layer semantics.
 
-`Control` nodes do not participate in Layer classification. Existing CanvasGroup traversal is retained: a `Control` draw inside a `CanvasGroup` subtree contributes to that CanvasGroup's Layer Source and is consequently affected by the Layer's opacity, blend mode, and clipping relationship.
+`Layer2D` is a composite Layer while its `composite_mode` is `COMPOSITE_MODE_ALWAYS` or its automatic rules require isolation. An automatic `Layer2D` with default settings is an ordinary `Node2D`; it does not allocate a CanvasGroup source. `Control` nodes do not participate in Layer classification, but their draws contribute to the nearest composited `Layer2D` or `CanvasGroup` source.
 
-A `CanvasGroup` is a Composite Layer when it has no direct `Node2D` children or every direct `Node2D` child is `Sprite2D` or `CanvasGroup`. It is a Leaf Layer when it has at least one direct `Node2D` child and none of its direct `Node2D` children are `Sprite2D` or `CanvasGroup`. `Control` and non-CanvasItem helper children do not affect classification.
-
-A `CanvasGroup` that mixes `Sprite2D` or `CanvasGroup` child Layers with other direct `Node2D` content is invalid. The renderer reports an error and continues without crashing; rendered output and all Layer behavior for that subtree are unspecified.
-
-Classification is reevaluated whenever direct children change; entering a mixed configuration reports the same error.
+`CanvasGroup` is always an explicit offscreen container. It is not itself a Layer and does not classify its direct children; active `Layer2D` and `Sprite2D` children retain their own Layer semantics inside the group.
 
 ## Layer Ordering
 
-A Composite `CanvasGroup` composites child Layers strictly by direct scene-tree sibling index. Each child Layer must use `z_index = 0`, `z_as_relative = true`, `show_behind_parent = false`, and `top_level = false`. A Composite `CanvasGroup` that owns child Layers must use `y_sort_enabled = false`.
+A parent that owns active `Layer2D` or `Sprite2D` child Layers composites them strictly by direct scene-tree sibling index. Each child Layer must use `z_index = 0`, `z_as_relative = true`, `show_behind_parent = false`, and `top_level = false`. The parent must use `y_sort_enabled = false`.
 
 Violating one of these requirements emits one clear error. The renderer does not correct the serialized property value; rendered output is undefined, but the invalid configuration must not crash the engine. Any other mechanism that changes relative ordering within the Layer tree also has undefined Layer behavior without additional validation requirements.
 
-Ordinary Layer Content in a Leaf `CanvasGroup` retains normal canvas z/y ordering within that Layer Source. A root `CanvasGroup` may use canvas ordering to position the complete Layer tree relative to rendering outside that tree.
+Ordinary `Node2D` content inside a `CanvasGroup` retains normal canvas z/y ordering within that group's source. A root `CanvasGroup` may use canvas ordering to position the complete Layer tree relative to rendering outside that tree.
