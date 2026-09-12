@@ -1,5 +1,6 @@
 """Focused archive contract checks; run with python misc/scripts/test_package_gdvm.py."""
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -39,7 +40,15 @@ class BundleContract(unittest.TestCase):
                 with ZipFile(path) as archive:
                     self.assertEqual(archive.read(executable), b"editor")
                     self.assertTrue(archive.getinfo(executable).external_attr >> 16 & 0o111)
-                    self.assertEqual(archive.read("templates/template"), b"export binary")
+                    self.assertFalse(any(name.startswith("templates/") for name in archive.namelist()))
+                    template_metadata = json.loads(archive.read("export-templates.json"))
+                    self.assertEqual(template_metadata["version"], version)
+                    template_name = f"godot-export-templates-{registry_platform}-{status}.zip"
+                    self.assertEqual(template_metadata["url"], f"https://github.com/CialloPaint/godot/releases/download/v{version}/{template_name}")
+                    self.assertEqual(template_metadata["sha512"], hashlib.sha512((output / template_name).read_bytes()).hexdigest())
+                    self.assertEqual((root / template_name).read_bytes(), (output / template_name).read_bytes())
+                    with ZipFile(output / template_name) as templates:
+                        self.assertEqual(templates.read("templates/template"), b"export binary")
                     self.assertFalse(any(name.endswith(".console.exe") for name in archive.namelist()))
                     for package in PACKAGES:
                         self.assertEqual(archive.read(f"GodotSharp/Tools/nupkgs/{package}.{version}.nupkg"), package.encode())
@@ -51,10 +60,17 @@ class BundleContract(unittest.TestCase):
             root = Path(directory)
             with ZipFile(root / "editor.zip", "w") as archive:
                 archive.writestr("GodotSharp/sdk.version", "wrong-version")
-            with ZipFile(root / "templates.zip", "w"):
-                pass
             with self.assertRaisesRegex(ValueError, "SDK version mismatch"):
-                assemble(root / "editor.zip", root / "templates.zip", root / "out.zip", "4.6.2-ciallo.g123456789", "Godot.exe")
+                assemble(root / "editor.zip", root / "out.zip", "4.6.2-ciallo.g123456789", "Godot.exe", {})
+
+    def test_rejects_mismatched_template_version_before_publication(self):
+        version = "4.6.2-ciallo.g123456789"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with ZipFile(root / "godot-export-templates-windows-x86_64-ciallo.g123456789.zip", "w") as archive:
+                archive.writestr("templates/version.txt", "wrong-version")
+            with self.assertRaisesRegex(ValueError, "Template version mismatch"):
+                publish_registry(root, root / "release", version, "CialloPaint/godot")
 
 
 if __name__ == "__main__":

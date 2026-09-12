@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble complete editor bundles and a gdvm v2 registry for one GitHub Release."""
+"""Publish editor bundles, optional export template archives, and a gdvm v2 registry."""
 
 import argparse
 import copy
@@ -18,17 +18,14 @@ PLATFORMS = {
 }
 
 
-def assemble(editor_archive, template_archive, destination, version, executable):
-    with ZipFile(editor_archive) as editor, ZipFile(template_archive) as templates:
+def assemble(editor_archive, destination, version, executable, template_metadata):
+    with ZipFile(editor_archive) as editor:
         metadata = [name for name in editor.namelist() if name.endswith("GodotSharp/sdk.version")]
         if len(metadata) != 1 or editor.read(metadata[0]).decode().strip() != version:
             raise ValueError(f"SDK version mismatch in {editor_archive}")
         prefix = metadata[0][:-len("GodotSharp/sdk.version")]
         for package in PACKAGES:
             editor.getinfo(f"{prefix}GodotSharp/Tools/nupkgs/{package}.{version}.nupkg")
-        base, status = version.split("-", 1)
-        if templates.read("templates/version.txt").decode().strip() != f"{base}.{status}.mono":
-            raise ValueError(f"Template version mismatch in {template_archive}")
         binaries = [
             name for name in editor.namelist()
             if name.startswith(prefix) and "/" not in name[len(prefix):]
@@ -37,27 +34,23 @@ def assemble(editor_archive, template_archive, destination, version, executable)
         if len(binaries) != 1:
             raise ValueError(f"Expected one editor executable in {editor_archive}: {binaries}")
         with ZipFile(destination, "w", compression=ZIP_DEFLATED) as bundle:
-            for source in (editor, templates):
-                for info in source.infolist():
-                    name = info.filename
-                    if source is editor:
-                        if not name.startswith(prefix):
-                            continue
-                        name = name[len(prefix):]
-                        if name.endswith(".console.exe"):
-                            continue
-                    if not name or info.is_dir():
-                        continue
-                    if PurePosixPath(name).is_absolute() or ".." in PurePosixPath(name).parts or "\\" in name:
-                        raise ValueError(f"Invalid archive path: {name}")
-                    output_info = copy.copy(info)
-                    output_info.filename = executable if info.filename == binaries[0] and source is editor else name
-                    if output_info.filename == executable:
-                        output_info.create_system = 3
-                        output_info.external_attr = 0o100755 << 16
-                    output_info.compress_type = ZIP_DEFLATED
-                    with source.open(info) as src, bundle.open(output_info, "w") as dst:
-                        shutil.copyfileobj(src, dst)
+            for info in editor.infolist():
+                if not info.filename.startswith(prefix):
+                    continue
+                name = info.filename[len(prefix):]
+                if not name or info.is_dir() or name.endswith(".console.exe"):
+                    continue
+                if PurePosixPath(name).is_absolute() or ".." in PurePosixPath(name).parts or "\\" in name:
+                    raise ValueError(f"Invalid archive path: {name}")
+                output_info = copy.copy(info)
+                output_info.filename = executable if info.filename == binaries[0] else name
+                if output_info.filename == executable:
+                    output_info.create_system = 3
+                    output_info.external_attr = 0o100755 << 16
+                output_info.compress_type = ZIP_DEFLATED
+                with editor.open(info) as src, bundle.open(output_info, "w") as dst:
+                    shutil.copyfileobj(src, dst)
+            bundle.writestr("export-templates.json", json.dumps(template_metadata, indent=2) + "\n")
 
 
 def publish_registry(packages, output, version, repository):
@@ -69,8 +62,20 @@ def publish_registry(packages, output, version, repository):
         status = version.split("-", 1)[1]
         name = f"godot-{platform}-{status}.zip"
         templates_platform = "linux-x86_64" if platform == "linuxbsd-x86_64" else platform
-        assemble(packages / name, packages / f"godot-export-templates-{templates_platform}-{status}.zip",
-                 output / name, version, executable)
+        template_name = f"godot-export-templates-{templates_platform}-{status}.zip"
+        template_archive = packages / template_name
+        with ZipFile(template_archive) as templates:
+            base = version.split("-", 1)[0]
+            if templates.read("templates/version.txt").decode().strip() != f"{base}.{status}.mono":
+                raise ValueError(f"Template version mismatch in {template_archive}")
+        shutil.copyfile(template_archive, output / template_name)
+        with template_archive.open("rb") as archive:
+            template_digest = hashlib.file_digest(archive, "sha512").hexdigest()
+        assemble(packages / name, output / name, version, executable, {
+            "version": version,
+            "sha512": template_digest,
+            "url": f"https://github.com/{repository}/releases/download/v{version}/{template_name}",
+        })
         with (output / name).open("rb") as archive:
             digest = hashlib.file_digest(archive, "sha512").hexdigest()
         variants[registry_platform] = {

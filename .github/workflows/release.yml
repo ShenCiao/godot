@@ -134,7 +134,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Assemble gdvm bundles and release registry
+      - name: Package editors, optional templates, and release registry
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
