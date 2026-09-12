@@ -446,6 +446,15 @@ def build_all(
 
     update_local_development_files(module_dir, output_dir, bool(local_development_name))
 
+    # Plain metadata for Git hook provisioning without executing the editor.
+    import xml.etree.ElementTree as ET
+
+    sdk_version = ET.parse(os.path.join(module_dir, "SdkPackageVersions.props")).findtext(
+        "./PropertyGroup/PackageVersion_Godot_NET_Sdk"
+    )
+    with open(os.path.join(output_dir, "GodotSharp", "sdk.version"), "w", encoding="utf-8", newline="\n") as metadata:
+        metadata.write(sdk_version + "\n")
+
     return 0
 
 

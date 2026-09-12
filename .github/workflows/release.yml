@@ -49,29 +49,7 @@ jobs:
 
           godot_version="$major.$minor.$patch"
           version_status="ciallo.g$(git rev-parse --short=9 HEAD)"
-          base_tag="v${godot_version}-ciallo"
-          last_number=0
-          existing_tag=""
-
-          while IFS= read -r tag; do
-            suffix="${tag#"$base_tag."}"
-            if [[ ! "$suffix" =~ ^[1-9][0-9]*$ ]]; then
-              continue
-            fi
-            if (( suffix > last_number )); then
-              last_number="$suffix"
-            fi
-            if [ "$(git rev-list -n 1 "$tag")" = "$head_sha" ]; then
-              existing_tag="$tag"
-            fi
-          done < <(git tag --list "${base_tag}.*" --sort=version:refname)
-
-          if [ -n "$existing_tag" ]; then
-            release_tag="$existing_tag"
-            echo "Reusing $release_tag for origin/ciallo@$head_sha."
-          else
-            release_tag="${base_tag}.$((last_number + 1))"
-          fi
+          release_tag="v${godot_version}-${version_status}"
 
           {
             echo "ref=$head_sha"
@@ -132,93 +110,9 @@ jobs:
           git tag -a "$RELEASE_TAG" "$HEAD_SHA" -m "Ciallo Godot $RELEASE_TAG ($GODOT_VERSION_STATUS)"
           git push origin "refs/tags/$RELEASE_TAG"
 
-  publish-feed:
-    name: Publish SDK feed
-    needs: [prepare, build, tag]
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
-    steps:
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Download SDK NuGet packages
-        uses: actions/download-artifact@v6
-        with:
-          name: godot-sdk-nupkgs-${{ needs.prepare.outputs.status }}
-          path: nupkgs_out
-
-      - name: Publish SDK packages to static NuGet feed
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          VERSION_STATUS: ${{ needs.prepare.outputs.status }}
-        run: |
-          set -euo pipefail
-
-          dotnet tool install --global Sleet
-          export PATH="$PATH:$HOME/.dotnet/tools"
-
-          FEED_DIR="$RUNNER_TEMP/feed"
-          git clone --branch gh-pages --single-branch \
-            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$FEED_DIR"
-
-          cat > "$RUNNER_TEMP/sleet.json" <<'JSON'
-          {
-            "sources": [
-              {
-                "name": "feed",
-                "type": "local",
-                "path": "FEED_DIR_PLACEHOLDER",
-                "baseURI": "https://shenciao.github.io/godot/"
-              }
-            ]
-          }
-          JSON
-          sed -i "s#FEED_DIR_PLACEHOLDER#${FEED_DIR}#" "$RUNNER_TEMP/sleet.json"
-
-          sleet init --config "$RUNNER_TEMP/sleet.json" --source feed || true
-          sleet push ./nupkgs_out --config "$RUNNER_TEMP/sleet.json" --source feed --force
-          touch "$FEED_DIR/.nojekyll"
-
-          cd "$FEED_DIR"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "Feed unchanged; nothing to commit."
-          else
-            git commit -m "Publish SDK packages for $VERSION_STATUS"
-            git push origin gh-pages
-          fi
-
-      - name: Upload static NuGet feed Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ${{ runner.temp }}/feed
-
-  deploy-pages:
-    name: Deploy static NuGet feed to Pages
-    needs: publish-feed
-    runs-on: ubuntu-22.04
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
-        with:
-          timeout: 1800000
-
   publish-release:
     name: Publish GitHub Release
-    needs: [prepare, build, tag, deploy-pages]
+    needs: [prepare, build, tag]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -230,10 +124,29 @@ jobs:
           path: packages
           merge-multiple: true
 
+      - name: Checkout packaging scripts
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          path: source
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Assemble gdvm bundles and release registry
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          python source/misc/scripts/package_gdvm.py \
+            --packages packages --output release \
+            --version "${RELEASE_TAG#v}" --repository "$GITHUB_REPOSITORY"
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           files: |
-            packages/*.zip
+            release/*.zip
+            release/*.json
           fail_on_unmatched_files: true

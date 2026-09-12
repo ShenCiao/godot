@@ -226,35 +226,15 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Build .NET assemblies and SDK NuGet packages
+      - name: Build .NET assemblies
         shell: bash
         env:
           GODOT_VERSION_STATUS: ${{ inputs.version_status }}
         run: |
-          mkdir -p ./nupkgs_out
           python modules/mono/build_scripts/build_assemblies.py \
             --godot-output-dir ./bin \
             --godot-platform=linuxbsd \
-            --push-nupkgs-local ./nupkgs_out \
             --no-deprecated
-
-      - name: Verify SDK NuGet packages
-        shell: bash
-        run: |
-          VERSION="$(python -c 'import version; print(f"{version.major}.{version.minor}.{version.patch}")')-${{ inputs.version_status }}"
-          test -f "./nupkgs_out/Godot.NET.Sdk.${VERSION}.nupkg"
-          test -f "./nupkgs_out/Godot.SourceGenerators.${VERSION}.nupkg"
-          test -f "./nupkgs_out/GodotSharp.${VERSION}.nupkg"
-          test -f "./nupkgs_out/GodotSharpEditor.${VERSION}.nupkg"
-          ls -lh ./nupkgs_out/
-
-      - name: Upload SDK NuGet packages
-        if: inputs.produce_artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: godot-sdk-nupkgs-${{ inputs.version_status }}
-          path: nupkgs_out/*.nupkg
-          if-no-files-found: error
 
       - name: Package editor
         if: inputs.produce_artifacts

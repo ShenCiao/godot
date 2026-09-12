@@ -55,6 +55,9 @@ namespace GodotTools.ProjectEditor
 
             var root = GenGameProject(name);
 
+            if (!string.IsNullOrWhiteSpace(ProjectUtils.GetGlobalGodotSdkVersion(path)))
+                root.Sdk = "Godot.NET.Sdk";
+
             // Save (without BOM)
             root.Save(path, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 

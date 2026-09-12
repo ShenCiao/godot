@@ -193,6 +193,11 @@ namespace GodotTools
             {
                 var project = ProjectUtils.Open(GodotSharpDirs.ProjectCsProjPath)
                               ?? throw new InvalidOperationException("Cannot open C# project.");
+                if (ProjectUtils.UsesGlobalGodotSdk(project))
+                {
+                    ShowErrorDialog("This project selects its Godot SDK in global.json. Update the published engine version there, then run the project's engine setup command.", "C# Project SDK");
+                    return;
+                }
                 string currentSdk = ProjectUtils.GetGodotSdkReference(project);
                 string editorSdk = ProjectGenerator.GodotSdkAttrValue;
 
@@ -264,7 +269,9 @@ namespace GodotTools
                 _sdkMismatchDialog.Title = "C# Project SDK Mismatch".TTR();
                 _sdkMismatchDialog.DialogText =
                     $"This project uses '{projectSdk}', but this editor was built for '{editorSdk}'.\n\n" +
-                    "The project file was not changed. Use C# > Sync C# project SDK version only when you intend to update the dependency.";
+                    (ProjectUtils.UsesGlobalGodotSdk(project)
+                        ? "Run the project's engine setup command and open the editor selected by global.json."
+                        : "The project file was not changed. Use C# > Sync C# project SDK version only when you intend to update the dependency.");
                 EditorInterface.Singleton.PopupDialogCentered(_sdkMismatchDialog);
             }
             catch (Exception e)

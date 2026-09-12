@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Build.Construction;
 using Microsoft.Build.Evaluation;
@@ -85,19 +87,11 @@ namespace GodotTools.ProjectEditor
             var root = project.Root;
             string godotSdkAttrValue = ProjectGenerator.GodotSdkAttrValue;
 
-            // Do NOT rewrite an SDK reference that is already a valid
-            // 'Godot.NET.Sdk/<version>'. For custom engine builds the SDK version
-            // in the .csproj is the source of truth: it is pinned in git to an exact
-            // package version (e.g. 'Godot.NET.Sdk/4.6.2-ciallo.g<sha>') and restored
-            // from a NuGet feed, independent of the version baked into the running
-            // editor binary. Forcing the editor's own version here would clobber that
-            // pin, break restore against the feed, and rewrite the file on every open.
-            //
-            // We only fill in the SDK when it is missing or malformed (e.g. a freshly
-            // generated project, or a manual edit that dropped the version). Keeping an
-            // existing valid reference untouched means self builds never overwrite the
-            // .csproj. Updating the pin is an explicit action in the editor's C# menu.
+            // Standard MSBuild resolution supports a versionless reference with the
+            // version supplied by the nearest global.json. Preserve that contract.
             string sdk = root.Sdk?.Trim() ?? string.Empty;
+            if (string.Equals(sdk, "Godot.NET.Sdk", StringComparison.OrdinalIgnoreCase))
+                return;
             if (IsValidGodotSdkReference(sdk))
                 return;
 
@@ -117,11 +111,53 @@ namespace GodotTools.ProjectEditor
             return version.Length > 0;
         }
 
+        public static string? FindGlobalJson(string projectPath)
+        {
+            for (DirectoryInfo? directory = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(projectPath))!);
+                 directory != null; directory = directory.Parent)
+            {
+                string path = Path.Combine(directory.FullName, "global.json");
+                if (File.Exists(path))
+                    return path;
+            }
+            return null;
+        }
+
+        public static string? GetGlobalGodotSdkVersion(string projectPath)
+        {
+            string? path = FindGlobalJson(projectPath);
+            if (path == null)
+                return null;
+            using var json = JsonDocument.Parse(File.ReadAllText(path), new JsonDocumentOptions
+            {
+                AllowTrailingCommas = true,
+                CommentHandling = JsonCommentHandling.Skip,
+            });
+            if (json.RootElement.TryGetProperty("msbuild-sdks", out var sdks) &&
+                sdks.TryGetProperty("Godot.NET.Sdk", out var version) &&
+                version.ValueKind == JsonValueKind.String)
+                return version.GetString();
+            return null;
+        }
+
         public static string GetGodotSdkReference(MSBuildProject project)
-            => project.Root.Sdk?.Trim() ?? string.Empty;
+        {
+            string sdk = project.Root.Sdk?.Trim() ?? string.Empty;
+            if (string.Equals(sdk, "Godot.NET.Sdk", StringComparison.OrdinalIgnoreCase))
+            {
+                string? version = GetGlobalGodotSdkVersion(project.Root.FullPath);
+                return string.IsNullOrWhiteSpace(version) ? sdk : $"Godot.NET.Sdk/{version}";
+            }
+            return sdk;
+        }
+
+        public static bool UsesGlobalGodotSdk(MSBuildProject project)
+            => string.Equals(project.Root.Sdk?.Trim(), "Godot.NET.Sdk", StringComparison.OrdinalIgnoreCase);
 
         public static bool SetGodotSdkReference(MSBuildProject project, string sdk)
         {
+            if (UsesGlobalGodotSdk(project))
+                throw new InvalidOperationException("Update the Godot SDK version in global.json and run the project's engine setup command.");
             sdk = sdk.Trim();
             if (!IsValidGodotSdkReference(sdk))
                 throw new ArgumentException("Invalid Godot .NET SDK reference.", nameof(sdk));

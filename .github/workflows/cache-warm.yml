@@ -2,7 +2,7 @@ name: Ciallo Godot Cache Warm
 
 on:
   schedule:
-    - cron: "17 3 */1 * *"
+    - cron: "17 3 */3 * *"
   workflow_dispatch:
 
 permissions:
