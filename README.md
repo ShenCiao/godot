@@ -3,7 +3,7 @@
 Bug fixes:
 - Fix dialog placement on multi-monitor setups: `Window.initial_position` is applied only the first time a `Window` instance is shown, reopening it preserves the user's latest position and size, and an explicit `popup(Rect2i)` still takes precedence. Off-screen fallback centering now also respects each display's virtual desktop origin.
 - Preserve captured Godot object references across C# editor assembly reloads, including internal controls such as `SpinBoxLineEdit`. See [C# delegate captures during editor reload](#c-delegate-captures-during-editor-reload).
-- Align `CheckBox` and `CheckButton` icons with the largest StyleBox margins when `align_to_largest_stylebox` is enabled. This keeps icon placement stable across normal, hover, and pressed states; Ciallo enables the constant globally for consistent layer-button layout.
+- Use consistent StyleBox margins for Button-family measurement and content placement. `align_to_largest_stylebox` selects either stable maximum margins or the current state's margins; state changes invalidate layout sizes before button signals run. Check and option icons reserve space using the same sizing rules, OptionButton caches content independently of state padding, and vertical icon layouts count text height once. See [Button's theme and property reference](doc/classes/Button.xml).
 
 Features:
 - Pen stylus subpixel coordinate

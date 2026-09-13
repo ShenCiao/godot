@@ -44,8 +44,17 @@ public:
 		ACTION_MODE_BUTTON_PRESS,
 		ACTION_MODE_BUTTON_RELEASE,
 	};
+	enum DrawMode {
+		DRAW_NORMAL,
+		DRAW_PRESSED,
+		DRAW_HOVER,
+		DRAW_DISABLED,
+		DRAW_HOVER_PRESSED,
+	};
 
 private:
+	DrawMode last_draw_mode = DRAW_NORMAL;
+	void _update_button_state();
 	BitField<MouseButtonMask> button_mask = MouseButtonMask::LEFT;
 	bool toggle_mode = false;
 	bool shortcut_in_tooltip = true;
@@ -93,14 +102,6 @@ protected:
 	GDVIRTUAL1(_toggled, bool)
 
 public:
-	enum DrawMode {
-		DRAW_NORMAL,
-		DRAW_PRESSED,
-		DRAW_HOVER,
-		DRAW_DISABLED,
-		DRAW_HOVER_PRESSED,
-	};
-
 	DrawMode get_draw_mode() const;
 
 	/* Signals */

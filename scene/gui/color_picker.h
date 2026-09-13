@@ -519,7 +519,6 @@ class ColorPickerButton : public Button {
 	bool popup_was_open = false;
 
 	struct ThemeCache {
-		Ref<StyleBox> normal_style;
 		Ref<Texture2D> background_icon;
 
 		Ref<Texture2D> overbright_indicator;

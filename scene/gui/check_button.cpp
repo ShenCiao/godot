@@ -56,20 +56,24 @@ Size2 CheckButton::get_icon_size() const {
 
 	Size2 tex_size = Size2(0, 0);
 	if (on_tex.is_valid()) {
-		tex_size = on_tex->get_size();
+		tex_size = _fit_icon_size(on_tex->get_size());
 	}
 	if (off_tex.is_valid()) {
-		tex_size = tex_size.max(off_tex->get_size());
+		tex_size = tex_size.max(_fit_icon_size(off_tex->get_size()));
 	}
 
-	return _fit_icon_size(tex_size);
+	return tex_size;
+}
+
+float CheckButton::_get_internal_margin(Side p_side) const {
+	return p_side == (is_layout_rtl() ? SIDE_LEFT : SIDE_RIGHT) ? get_icon_size().width : 0.0f;
 }
 
 Size2 CheckButton::get_minimum_size() const {
 	Size2 minsize = Button::get_minimum_size();
 	const Size2 tex_size = get_icon_size();
 	if (tex_size.width > 0 || tex_size.height > 0) {
-		const Size2 padding = _get_largest_stylebox_size();
+		const Size2 padding = _get_stylebox_size();
 		Size2 content_size = minsize - padding;
 		if (content_size.width > 0 && tex_size.width > 0) {
 			content_size.width += MAX(0, theme_cache.h_separation);
@@ -90,18 +94,6 @@ void CheckButton::_notification(int p_what) {
 			ERR_FAIL_COND(ae.is_null());
 
 			DisplayServer::get_singleton()->accessibility_update_set_role(ae, DisplayServer::AccessibilityRole::ROLE_CHECK_BUTTON);
-		} break;
-
-		case NOTIFICATION_THEME_CHANGED:
-		case NOTIFICATION_LAYOUT_DIRECTION_CHANGED:
-		case NOTIFICATION_TRANSLATION_CHANGED: {
-			if (is_layout_rtl()) {
-				_set_internal_margin(SIDE_LEFT, get_icon_size().width);
-				_set_internal_margin(SIDE_RIGHT, 0.f);
-			} else {
-				_set_internal_margin(SIDE_LEFT, 0.f);
-				_set_internal_margin(SIDE_RIGHT, get_icon_size().width);
-			}
 		} break;
 
 		case NOTIFICATION_DRAW: {
@@ -129,19 +121,13 @@ void CheckButton::_notification(int p_what) {
 				}
 			}
 
-			Vector2 ofs;
-			Size2 tex_size = get_icon_size();
-			const float left_margin = _is_align_to_largest_stylebox() ? _get_largest_stylebox_margin(SIDE_LEFT) :
-					theme_cache.normal_style->get_margin(SIDE_LEFT);
-			const float right_margin = _is_align_to_largest_stylebox() ? _get_largest_stylebox_margin(SIDE_RIGHT) :
-					theme_cache.normal_style->get_margin(SIDE_RIGHT);
-
-			if (rtl) {
-				ofs.x = left_margin;
-			} else {
-				ofs.x = get_size().width - (tex_size.width + right_margin);
+			const Rect2 content_rect = _get_content_rect();
+			const Size2 tex_size = get_icon_size();
+			Vector2 ofs = content_rect.position;
+			if (!rtl) {
+				ofs.x += content_rect.size.width - tex_size.width;
 			}
-			ofs.y = (get_size().height - tex_size.height) / 2 + theme_cache.check_v_offset;
+			ofs.y += (content_rect.size.height - tex_size.height) / 2 + theme_cache.check_v_offset;
 
 			if (is_pressed()) {
 				on_tex->draw_rect(ci, Rect2(ofs, _fit_icon_size(on_tex->get_size())), false, theme_cache.button_checked_color);
@@ -155,7 +141,6 @@ void CheckButton::_notification(int p_what) {
 void CheckButton::_bind_methods() {
 	BIND_THEME_ITEM(Theme::DATA_TYPE_CONSTANT, CheckButton, h_separation);
 	BIND_THEME_ITEM(Theme::DATA_TYPE_CONSTANT, CheckButton, check_v_offset);
-	BIND_THEME_ITEM_CUSTOM(Theme::DATA_TYPE_STYLEBOX, CheckButton, normal_style, "normal");
 
 	BIND_THEME_ITEM(Theme::DATA_TYPE_ICON, CheckButton, checked);
 	BIND_THEME_ITEM(Theme::DATA_TYPE_ICON, CheckButton, unchecked);
@@ -175,12 +160,6 @@ CheckButton::CheckButton(const String &p_text) :
 	set_toggle_mode(true);
 
 	set_text_alignment(HORIZONTAL_ALIGNMENT_LEFT);
-
-	if (is_layout_rtl()) {
-		_set_internal_margin(SIDE_LEFT, get_icon_size().width);
-	} else {
-		_set_internal_margin(SIDE_RIGHT, get_icon_size().width);
-	}
 }
 
 CheckButton::~CheckButton() {

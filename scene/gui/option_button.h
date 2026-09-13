@@ -41,15 +41,13 @@ class OptionButton : public Button {
 	PopupMenu *popup = nullptr;
 	int current = -1;
 	bool fit_to_longest_item = true;
-	Vector2 _cached_size;
+	Vector2 _cached_content_size;
 	bool cache_refresh_pending = false;
 	bool allow_reselect = false;
 	bool initialized = false;
 	int queued_current = -1;
 
 	struct ThemeCache {
-		Ref<StyleBox> normal;
-
 		Color font_color;
 		Color font_focus_color;
 		Color font_pressed_color;
@@ -77,6 +75,7 @@ class OptionButton : public Button {
 	virtual void pressed() override;
 
 protected:
+	float _get_internal_margin(Side p_side) const override;
 	Size2 get_minimum_size() const override;
 	virtual void _queue_update_size_cache() override;
 	virtual String _get_translated_text(const String &p_text) const override;

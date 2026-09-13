@@ -40,11 +40,11 @@ Size2 Button::get_minimum_size() const {
 		_icon = theme_cache.icon;
 	}
 
-	return get_minimum_size_for_text_and_icon("", _icon);
+	return _get_stylebox_size() + _get_minimum_content_size(text_buf, !xl_text.is_empty(), _icon);
 }
 
-void Button::_set_internal_margin(Side p_side, float p_value) {
-	_internal_margin[p_side] = p_value;
+float Button::_get_internal_margin(Side p_side) const {
+	return 0.0f;
 }
 
 void Button::_queue_update_size_cache() {
@@ -94,11 +94,15 @@ void Button::_update_theme_item_cache() {
 	theme_cache.max_style_size = theme_cache.max_style_size.max(Vector2(theme_cache.style_margin_left + theme_cache.style_margin_right, theme_cache.style_margin_top + theme_cache.style_margin_bottom));
 }
 
-Size2 Button::_get_largest_stylebox_size() const {
-	return theme_cache.max_style_size;
+Size2 Button::_get_stylebox_size() const {
+	return theme_cache.align_to_largest_stylebox ? theme_cache.max_style_size : _get_current_stylebox()->get_minimum_size();
 }
 
-float Button::_get_largest_stylebox_margin(Side p_side) const {
+float Button::_get_stylebox_margin(Side p_side) const {
+	if (!theme_cache.align_to_largest_stylebox) {
+		return _get_current_stylebox()->get_margin(p_side);
+	}
+
 	switch (p_side) {
 		case SIDE_LEFT:
 			return theme_cache.style_margin_left;
@@ -112,8 +116,9 @@ float Button::_get_largest_stylebox_margin(Side p_side) const {
 	return 0.0;
 }
 
-bool Button::_is_align_to_largest_stylebox() const {
-	return theme_cache.align_to_largest_stylebox;
+Rect2 Button::_get_content_rect() const {
+	const Vector2 offset(_get_stylebox_margin(SIDE_LEFT), _get_stylebox_margin(SIDE_TOP));
+	return Rect2(offset, get_size() - offset - Vector2(_get_stylebox_margin(SIDE_RIGHT), _get_stylebox_margin(SIDE_BOTTOM)));
 }
 
 Ref<StyleBox> Button::_get_current_stylebox() const {
@@ -190,6 +195,10 @@ void Button::_notification(int p_what) {
 		} break;
 
 		case NOTIFICATION_LAYOUT_DIRECTION_CHANGED: {
+			if (text_direction == TEXT_DIRECTION_INHERITED) {
+				_shape();
+				update_minimum_size();
+			}
 			queue_redraw();
 		} break;
 
@@ -248,29 +257,24 @@ void Button::_notification(int p_what) {
 				break;
 			}
 
-			const float style_margin_left = (theme_cache.align_to_largest_stylebox) ? theme_cache.style_margin_left : style->get_margin(SIDE_LEFT);
-			const float style_margin_right = (theme_cache.align_to_largest_stylebox) ? theme_cache.style_margin_right : style->get_margin(SIDE_RIGHT);
-			const float style_margin_top = (theme_cache.align_to_largest_stylebox) ? theme_cache.style_margin_top : style->get_margin(SIDE_TOP);
-			const float style_margin_bottom = (theme_cache.align_to_largest_stylebox) ? theme_cache.style_margin_bottom : style->get_margin(SIDE_BOTTOM);
-
-			Size2 drawable_size_remained = size;
-
-			{ // The size after the stelybox is stripped.
-				drawable_size_remained.width -= style_margin_left + style_margin_right;
-				drawable_size_remained.height -= style_margin_top + style_margin_bottom;
-			}
+			const Rect2 content_rect = _get_content_rect();
+			const float style_margin_left = content_rect.position.x;
+			const float style_margin_top = content_rect.position.y;
+			const float style_margin_right = _get_stylebox_margin(SIDE_RIGHT);
+			const float style_margin_bottom = _get_stylebox_margin(SIDE_BOTTOM);
+			Size2 drawable_size_remained = content_rect.size;
 
 			const int h_separation = MAX(0, theme_cache.h_separation);
 
-			float left_internal_margin_with_h_separation = _internal_margin[SIDE_LEFT];
-			float right_internal_margin_with_h_separation = _internal_margin[SIDE_RIGHT];
+			float left_internal_margin_with_h_separation = _get_internal_margin(SIDE_LEFT);
+			float right_internal_margin_with_h_separation = _get_internal_margin(SIDE_RIGHT);
 			{ // The width reserved for internal element in derived classes (and h_separation if needed).
 
-				if (_internal_margin[SIDE_LEFT] > 0.0f) {
+				if (left_internal_margin_with_h_separation > 0.0f) {
 					left_internal_margin_with_h_separation += h_separation;
 				}
 
-				if (_internal_margin[SIDE_RIGHT] > 0.0f) {
+				if (right_internal_margin_with_h_separation > 0.0f) {
 					right_internal_margin_with_h_separation += h_separation;
 				}
 
@@ -497,19 +501,20 @@ Size2 Button::_fit_icon_size(const Size2 &p_size) const {
 }
 
 Size2 Button::get_minimum_size_for_text_and_icon(const String &p_text, Ref<Texture2D> p_icon) const {
-	// Do not include `_internal_margin`, it's already added in the `get_minimum_size` overrides.
-
 	Ref<TextParagraph> paragraph;
-	if (p_text.is_empty()) {
-		paragraph = text_buf;
-	} else {
-		paragraph.instantiate();
-		_shape(paragraph, p_text);
-	}
+	paragraph.instantiate();
+	_shape(paragraph, p_text);
+	return _get_stylebox_size() + _get_minimum_content_size(paragraph, !p_text.is_empty(), p_icon);
+}
 
-	Size2 minsize = paragraph->get_size();
+Size2 Button::_get_minimum_content_size(const Ref<TextParagraph> &p_paragraph, bool p_has_text, const Ref<Texture2D> &p_icon) const {
+	// Derived classes add the space reserved for their additional icons.
+	Size2 minsize = p_paragraph->get_size();
 	if (clip_text || overrun_behavior != TextServer::OVERRUN_NO_TRIMMING || autowrap_mode != TextServer::AUTOWRAP_OFF) {
 		minsize.width = 0;
+	}
+	if (p_has_text) {
+		minsize.height = MAX(minsize.height, theme_cache.font->get_height(theme_cache.font_size));
 	}
 
 	if (!expand_icon && p_icon.is_valid()) {
@@ -522,7 +527,7 @@ Size2 Button::get_minimum_size_for_text_and_icon(const String &p_text, Ref<Textu
 
 		if (horizontal_icon_alignment != HORIZONTAL_ALIGNMENT_CENTER) {
 			minsize.width += icon_size.width;
-			if (!xl_text.is_empty() || !p_text.is_empty()) {
+			if (p_has_text) {
 				minsize.width += MAX(0, theme_cache.h_separation);
 			}
 		} else {
@@ -530,25 +535,12 @@ Size2 Button::get_minimum_size_for_text_and_icon(const String &p_text, Ref<Textu
 		}
 	}
 
-	if (!xl_text.is_empty() || !p_text.is_empty()) {
-		Ref<Font> font = theme_cache.font;
-		float font_height = font->get_height(theme_cache.font_size);
-		if (vertical_icon_alignment == VERTICAL_ALIGNMENT_CENTER) {
-			minsize.height = MAX(font_height, minsize.height);
-		} else {
-			minsize.height += font_height;
-		}
-	}
-
-	return (theme_cache.align_to_largest_stylebox ? _get_largest_stylebox_size() : _get_current_stylebox()->get_minimum_size()) + minsize;
+	return minsize;
 }
 
 void Button::_shape(Ref<TextParagraph> p_paragraph, String p_text) const {
 	if (p_paragraph.is_null()) {
 		p_paragraph = text_buf;
-	}
-
-	if (p_text.is_empty()) {
 		p_text = xl_text;
 	}
 
@@ -629,6 +621,7 @@ void Button::set_autowrap_mode(TextServer::AutowrapMode p_mode) {
 	if (autowrap_mode != p_mode) {
 		autowrap_mode = p_mode;
 		_shape();
+		_queue_update_size_cache();
 		queue_redraw();
 		update_minimum_size();
 	}
@@ -642,6 +635,7 @@ void Button::set_autowrap_trim_flags(BitField<TextServer::LineBreakFlag> p_flags
 	if (autowrap_flags_trim != (p_flags & TextServer::BREAK_TRIM_MASK)) {
 		autowrap_flags_trim = p_flags & TextServer::BREAK_TRIM_MASK;
 		_shape();
+		_queue_update_size_cache();
 		queue_redraw();
 		update_minimum_size();
 	}
@@ -656,6 +650,8 @@ void Button::set_text_direction(Control::TextDirection p_text_direction) {
 	if (text_direction != p_text_direction) {
 		text_direction = p_text_direction;
 		_shape();
+		_queue_update_size_cache();
+		update_minimum_size();
 		queue_accessibility_update();
 		queue_redraw();
 	}
@@ -669,6 +665,8 @@ void Button::set_language(const String &p_language) {
 	if (language != p_language) {
 		language = p_language;
 		_shape();
+		_queue_update_size_cache();
+		update_minimum_size();
 		queue_accessibility_update();
 		queue_redraw();
 	}
@@ -698,6 +696,7 @@ void Button::set_button_icon(const Ref<Texture2D> &p_icon) {
 }
 
 void Button::_texture_changed() {
+	_queue_update_size_cache();
 	queue_redraw();
 	update_minimum_size();
 }
@@ -770,6 +769,7 @@ void Button::set_icon_alignment(HorizontalAlignment p_alignment) {
 	}
 
 	horizontal_icon_alignment = p_alignment;
+	_queue_update_size_cache();
 	update_minimum_size();
 	queue_redraw();
 }

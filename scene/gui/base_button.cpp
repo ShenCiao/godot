@@ -35,8 +35,19 @@
 #include "scene/main/timer.h"
 #include "scene/main/window.h"
 
+void BaseButton::_update_button_state() {
+	const DrawMode draw_mode = get_draw_mode();
+	if (last_draw_mode != draw_mode) {
+		last_draw_mode = draw_mode;
+		// State-dependent styles can change the size requested from a Container.
+		update_minimum_size();
+	}
+	queue_redraw();
+}
+
 void BaseButton::_unpress_group() {
 	if (button_group.is_null()) {
+		_update_button_state();
 		return;
 	}
 
@@ -44,6 +55,7 @@ void BaseButton::_unpress_group() {
 		status.pressed = true;
 		queue_accessibility_update();
 	}
+	_update_button_state();
 
 	for (BaseButton *E : button_group->buttons) {
 		if (E == this) {
@@ -79,7 +91,7 @@ void BaseButton::gui_input(const Ref<InputEvent> &p_event) {
 			bool last_press_inside = status.pressing_inside;
 			status.pressing_inside = has_point(mouse_motion->get_position());
 			if (last_press_inside != status.pressing_inside) {
-				queue_redraw();
+				_update_button_state();
 			}
 		}
 	}
@@ -102,7 +114,7 @@ void BaseButton::_accessibility_action_click(const Variant &p_data) {
 		_pressed();
 	}
 	queue_accessibility_update();
-	queue_redraw();
+	_update_button_state();
 }
 
 void BaseButton::_notification(int p_what) {
@@ -139,33 +151,33 @@ void BaseButton::_notification(int p_what) {
 		case NOTIFICATION_MOUSE_ENTER: {
 			status.hovering = true;
 			queue_accessibility_update();
-			queue_redraw();
+			_update_button_state();
 		} break;
 
 		case NOTIFICATION_MOUSE_EXIT: {
 			status.hovering = false;
 			queue_accessibility_update();
-			queue_redraw();
+			_update_button_state();
 		} break;
 
 		case NOTIFICATION_DRAG_BEGIN:
 		case NOTIFICATION_SCROLL_BEGIN: {
 			if (status.press_attempt) {
 				status.press_attempt = false;
-				queue_redraw();
+				_update_button_state();
 			}
 		} break;
 
 		case NOTIFICATION_FOCUS_ENTER: {
-			queue_redraw();
+			_update_button_state();
 		} break;
 
 		case NOTIFICATION_FOCUS_EXIT: {
 			if (status.press_attempt) {
 				status.press_attempt = false;
-				queue_redraw();
+				_update_button_state();
 			} else if (status.hovering) {
-				queue_redraw();
+				_update_button_state();
 			}
 
 			if (status.pressed_down_with_focus) {
@@ -185,17 +197,20 @@ void BaseButton::_notification(int p_what) {
 			status.hovering = false;
 			status.press_attempt = false;
 			status.pressing_inside = false;
+			_update_button_state();
 		} break;
 	}
 }
 
 void BaseButton::_pressed() {
+	_update_button_state();
 	GDVIRTUAL_CALL(_pressed);
 	pressed();
 	emit_signal(SceneStringName(pressed));
 }
 
 void BaseButton::_toggled(bool p_pressed) {
+	_update_button_state();
 	GDVIRTUAL_CALL(_toggled, p_pressed);
 	toggled(p_pressed);
 	emit_signal(SceneStringName(toggled), p_pressed);
@@ -207,6 +222,7 @@ void BaseButton::on_action_event(Ref<InputEvent> p_event) {
 	if (p_event->is_pressed() && (mouse_button.is_null() || status.hovering)) {
 		status.press_attempt = true;
 		status.pressing_inside = true;
+		_update_button_state();
 		if (!status.pressed_down_with_focus) {
 			status.pressed_down_with_focus = true;
 			emit_signal(SNAME("button_down"));
@@ -240,13 +256,14 @@ void BaseButton::on_action_event(Ref<InputEvent> p_event) {
 	if (!p_event->is_pressed()) {
 		status.press_attempt = false;
 		status.pressing_inside = false;
+		_update_button_state();
 		if (status.pressed_down_with_focus) {
 			status.pressed_down_with_focus = false;
 			emit_signal(SNAME("button_up"));
 		}
 	}
 
-	queue_redraw();
+	_update_button_state();
 }
 
 void BaseButton::pressed() {
@@ -261,6 +278,7 @@ void BaseButton::set_disabled(bool p_disabled) {
 	}
 
 	status.disabled = p_disabled;
+	_update_button_state();
 	if (p_disabled) {
 		if (!toggle_mode) {
 			status.pressed = false;
@@ -273,8 +291,7 @@ void BaseButton::set_disabled(bool p_disabled) {
 		}
 	}
 	queue_accessibility_update();
-	queue_redraw();
-	update_minimum_size();
+	_update_button_state();
 }
 
 bool BaseButton::is_disabled() const {
@@ -307,7 +324,7 @@ void BaseButton::set_pressed_no_signal(bool p_pressed) {
 	}
 	status.pressed = p_pressed;
 	queue_accessibility_update();
-	queue_redraw();
+	_update_button_state();
 }
 
 bool BaseButton::is_pressing() const {
@@ -365,6 +382,7 @@ void BaseButton::set_toggle_mode(bool p_on) {
 	queue_accessibility_update();
 
 	toggle_mode = p_on;
+	_update_button_state();
 	update_configuration_warnings();
 }
 
@@ -401,6 +419,7 @@ BitField<MouseButtonMask> BaseButton::get_button_mask() const {
 
 void BaseButton::set_keep_pressed_outside(bool p_on) {
 	keep_pressed_outside = p_on;
+	_update_button_state();
 }
 
 bool BaseButton::is_keep_pressed_outside() const {
@@ -429,7 +448,7 @@ Ref<Shortcut> BaseButton::get_shortcut() const {
 
 void BaseButton::_shortcut_feedback_timeout() {
 	in_shortcut_feedback = false;
-	queue_redraw();
+	_update_button_state();
 }
 
 void BaseButton::shortcut_input(const Ref<InputEvent> &p_event) {
@@ -450,7 +469,7 @@ void BaseButton::shortcut_input(const Ref<InputEvent> &p_event) {
 		} else {
 			_pressed();
 		}
-		queue_redraw();
+		_update_button_state();
 		accept_event();
 
 		if (shortcut_feedback && is_inside_tree()) {
@@ -463,6 +482,7 @@ void BaseButton::shortcut_input(const Ref<InputEvent> &p_event) {
 			}
 
 			in_shortcut_feedback = true;
+			_update_button_state();
 			shortcut_feedback_timer->start();
 		}
 	}
@@ -507,7 +527,7 @@ void BaseButton::set_button_group(const Ref<ButtonGroup> &p_group) {
 	}
 
 	queue_accessibility_update();
-	queue_redraw(); //checkbox changes to radio if set a buttongroup
+	_update_button_state(); //checkbox changes to radio if set a buttongroup
 	update_configuration_warnings();
 }
 

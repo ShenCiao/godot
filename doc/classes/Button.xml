@@ -54,9 +54,11 @@
 		</member>
 		<member name="expand_icon" type="bool" setter="set_expand_icon" getter="is_expand_icon" default="false">
 			When enabled, the button's icon will expand/shrink to fit the button's size while keeping its aspect. See also [theme_item icon_max_width].
+			The icon's original size does not contribute to the button's minimum size when this is enabled. This applies to [member icon] and [theme_item icon], not to additional state icons such as [theme_item CheckBox.checked] or [theme_item OptionButton.arrow].
 		</member>
 		<member name="flat" type="bool" setter="set_flat" getter="is_flat" default="false">
 			Flat buttons don't display decoration.
+			StyleBox content margins still affect layout, and the focus StyleBox is still drawn when applicable.
 		</member>
 		<member name="icon" type="Texture2D" setter="set_button_icon" getter="get_button_icon">
 			Button's icon, if text is present the icon will be placed before the text.
@@ -123,6 +125,7 @@
 		</theme_item>
 		<theme_item name="align_to_largest_stylebox" data_type="constant" type="int" default="0">
 			This constant acts as a boolean. If [code]true[/code], the minimum size of the button and text/icon alignment is always based on the largest stylebox margins, otherwise it's based on the current button state stylebox margins.
+			The largest margins are computed separately for each side across normal, hover, pressed, hover-pressed, and disabled styles, using mirrored styles for right-to-left layouts when available. The focus style is an overlay and does not contribute. When [code]false[/code], changing the button state can resize the button and rearrange neighboring controls in a [Container].
 		</theme_item>
 		<theme_item name="h_separation" data_type="constant" type="int" default="4">
 			The horizontal space between [Button]'s icon and text. Negative values will be treated as [code]0[/code] when used.

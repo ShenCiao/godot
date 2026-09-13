@@ -54,7 +54,6 @@ private:
 	HorizontalAlignment alignment = HORIZONTAL_ALIGNMENT_CENTER;
 	HorizontalAlignment horizontal_icon_alignment = HORIZONTAL_ALIGNMENT_LEFT;
 	VerticalAlignment vertical_icon_alignment = VERTICAL_ALIGNMENT_CENTER;
-	float _internal_margin[4] = {};
 
 	struct ThemeCache {
 		Ref<StyleBox> normal;
@@ -106,19 +105,20 @@ private:
 	void _shape(Ref<TextParagraph> p_paragraph = Ref<TextParagraph>(), String p_text = "") const;
 	void _texture_changed();
 	void _update_style_margins(const Ref<StyleBox> &p_stylebox);
+	Size2 _get_minimum_content_size(const Ref<TextParagraph> &p_paragraph, bool p_has_text, const Ref<Texture2D> &p_icon) const;
 
 protected:
 	virtual void _update_theme_item_cache() override;
 
-	void _set_internal_margin(Side p_side, float p_value);
+	virtual float _get_internal_margin(Side p_side) const;
 	virtual void _queue_update_size_cache();
 	virtual String _get_translated_text(const String &p_text) const;
 
 	Size2 _fit_icon_size(const Size2 &p_size) const;
 	Ref<StyleBox> _get_current_stylebox() const;
-	Size2 _get_largest_stylebox_size() const;
-	float _get_largest_stylebox_margin(Side p_side) const;
-	bool _is_align_to_largest_stylebox() const;
+	Size2 _get_stylebox_size() const;
+	float _get_stylebox_margin(Side p_side) const;
+	Rect2 _get_content_rect() const;
 	void _notification(int p_what);
 	static void _bind_methods();
 

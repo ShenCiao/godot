@@ -263,12 +263,14 @@
 	<theme_items>
 		<theme_item name="arrow_margin" data_type="constant" type="int" default="4">
 			The horizontal space between the arrow icon and the right edge of the button.
+			In right-to-left layouts, this is measured from the left edge. This space is reserved when calculating the button's minimum size.
 		</theme_item>
 		<theme_item name="modulate_arrow" data_type="constant" type="int" default="0">
 			If different than [code]0[/code], the arrow icon will be modulated to the font color.
 		</theme_item>
 		<theme_item name="arrow" data_type="icon" type="Texture2D">
 			The arrow icon to be drawn on the right end of the button.
+			The arrow is centered vertically in the content area selected by [theme_item Button.align_to_largest_stylebox], and its size is limited by [theme_item Button.icon_max_width].
 		</theme_item>
 	</theme_items>
 </class>

@@ -2424,13 +2424,13 @@ void ColorPickerButton::_notification(int p_what) {
 		} break;
 
 		case NOTIFICATION_DRAW: {
-			const Rect2 r = Rect2(theme_cache.normal_style->get_offset(), get_size() - theme_cache.normal_style->get_minimum_size());
+			const Rect2 r = _get_content_rect();
 			draw_texture_rect(theme_cache.background_icon, r, true);
 			draw_rect(r, color);
 
 			if (color.r > 1 || color.g > 1 || color.b > 1) {
 				// Draw an indicator to denote that the color is "overbright" and can't be displayed accurately in the preview
-				draw_texture(theme_cache.overbright_indicator, theme_cache.normal_style->get_offset());
+				draw_texture(theme_cache.overbright_indicator, r.position);
 			}
 		} break;
 
@@ -2541,7 +2541,6 @@ void ColorPickerButton::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "edit_alpha"), "set_edit_alpha", "is_editing_alpha");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "edit_intensity"), "set_edit_intensity", "is_editing_intensity");
 
-	BIND_THEME_ITEM_CUSTOM(Theme::DATA_TYPE_STYLEBOX, ColorPickerButton, normal_style, "normal");
 	BIND_THEME_ITEM_CUSTOM(Theme::DATA_TYPE_ICON, ColorPickerButton, background_icon, "bg");
 	BIND_THEME_ITEM_EXT(Theme::DATA_TYPE_ICON, ColorPickerButton, overbright_indicator, "overbright_indicator", "ColorPicker");
 }

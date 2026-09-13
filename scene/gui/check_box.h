@@ -38,7 +38,6 @@ class CheckBox : public Button {
 	struct ThemeCache {
 		int h_separation = 0;
 		int check_v_offset = 0;
-		Ref<StyleBox> normal_style;
 
 		Ref<Texture2D> checked;
 		Ref<Texture2D> unchecked;
@@ -54,6 +53,7 @@ class CheckBox : public Button {
 	} theme_cache;
 
 protected:
+	float _get_internal_margin(Side p_side) const override;
 	Size2 get_icon_size() const;
 	Size2 get_minimum_size() const override;
 

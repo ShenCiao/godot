@@ -49,20 +49,27 @@ void OptionButton::shortcut_input(const Ref<InputEvent> &p_event) {
 	Button::shortcut_input(p_event);
 }
 
+float OptionButton::_get_internal_margin(Side p_side) const {
+	if (p_side == (is_layout_rtl() ? SIDE_LEFT : SIDE_RIGHT) && has_theme_icon(SNAME("arrow"))) {
+		return _fit_icon_size(theme_cache.arrow_icon->get_size()).width + MAX(0.0f, theme_cache.arrow_margin - _get_stylebox_margin(p_side));
+	}
+	return 0.0f;
+}
+
 Size2 OptionButton::get_minimum_size() const {
 	Size2 minsize;
 	if (fit_to_longest_item) {
-		minsize = _cached_size;
+		minsize = _cached_content_size + _get_stylebox_size();
 	} else {
 		minsize = Button::get_minimum_size();
 	}
 
 	if (has_theme_icon(SNAME("arrow"))) {
-		const Size2 padding = _get_largest_stylebox_size();
-		const Size2 arrow_size = theme_cache.arrow_icon->get_size();
+		const Size2 padding = _get_stylebox_size();
+		const Size2 arrow_size = _fit_icon_size(theme_cache.arrow_icon->get_size());
 
 		Size2 content_size = minsize - padding;
-		content_size.width += arrow_size.width + MAX(0, theme_cache.h_separation);
+		content_size.width += _get_internal_margin(is_layout_rtl() ? SIDE_LEFT : SIDE_RIGHT) + MAX(0, theme_cache.h_separation);
 		content_size.height = MAX(content_size.height, arrow_size.height);
 
 		minsize = content_size + padding;
@@ -83,13 +90,6 @@ void OptionButton::_notification(int p_what) {
 
 		case NOTIFICATION_POSTINITIALIZE: {
 			_refresh_size_cache();
-			if (has_theme_icon(SNAME("arrow"))) {
-				if (is_layout_rtl()) {
-					_set_internal_margin(SIDE_LEFT, theme_cache.arrow_icon->get_width());
-				} else {
-					_set_internal_margin(SIDE_RIGHT, theme_cache.arrow_icon->get_width());
-				}
-			}
 		} break;
 
 		case NOTIFICATION_DRAW: {
@@ -123,14 +123,14 @@ void OptionButton::_notification(int p_what) {
 			}
 
 			Size2 size = get_size();
+			const Size2 arrow_size = _fit_icon_size(theme_cache.arrow_icon->get_size());
+			const Rect2 content_rect = _get_content_rect();
 
-			Point2 ofs;
-			if (is_layout_rtl()) {
-				ofs = Point2(theme_cache.arrow_margin, int(Math::abs((size.height - theme_cache.arrow_icon->get_height()) / 2)));
-			} else {
-				ofs = Point2(size.width - theme_cache.arrow_icon->get_width() - theme_cache.arrow_margin, int(Math::abs((size.height - theme_cache.arrow_icon->get_height()) / 2)));
+			Point2 ofs(theme_cache.arrow_margin, Math::floor(content_rect.position.y + (content_rect.size.height - arrow_size.height) / 2));
+			if (!is_layout_rtl()) {
+				ofs.x = size.width - arrow_size.width - theme_cache.arrow_margin;
 			}
-			theme_cache.arrow_icon->draw(ci, ofs, clr);
+			theme_cache.arrow_icon->draw_rect(ci, Rect2(ofs, arrow_size), false, clr);
 		} break;
 
 		case NOTIFICATION_TRANSLATION_CHANGED:
@@ -139,15 +139,6 @@ void OptionButton::_notification(int p_what) {
 			[[fallthrough]];
 		}
 		case NOTIFICATION_THEME_CHANGED: {
-			if (has_theme_icon(SNAME("arrow"))) {
-				if (is_layout_rtl()) {
-					_set_internal_margin(SIDE_LEFT, theme_cache.arrow_icon->get_width());
-					_set_internal_margin(SIDE_RIGHT, 0.f);
-				} else {
-					_set_internal_margin(SIDE_LEFT, 0.f);
-					_set_internal_margin(SIDE_RIGHT, theme_cache.arrow_icon->get_width());
-				}
-			}
 			_refresh_size_cache();
 		} break;
 
@@ -446,9 +437,10 @@ void OptionButton::_refresh_size_cache() {
 	cache_refresh_pending = false;
 
 	if (fit_to_longest_item) {
-		_cached_size = theme_cache.normal->get_minimum_size();
+		_cached_content_size = Size2();
+		const Size2 padding = _get_stylebox_size();
 		for (int i = 0; i < get_item_count(); i++) {
-			_cached_size = _cached_size.max(get_minimum_size_for_text_and_icon(popup->get_item_xl_text(i), get_item_icon(i)));
+			_cached_content_size = _cached_content_size.max(get_minimum_size_for_text_and_icon(popup->get_item_xl_text(i), get_item_icon(i)) - padding);
 		}
 	}
 	update_minimum_size();
@@ -605,8 +597,6 @@ void OptionButton::_bind_methods() {
 
 	ADD_SIGNAL(MethodInfo("item_selected", PropertyInfo(Variant::INT, "index")));
 	ADD_SIGNAL(MethodInfo("item_focused", PropertyInfo(Variant::INT, "index")));
-
-	BIND_THEME_ITEM(Theme::DATA_TYPE_STYLEBOX, OptionButton, normal);
 
 	BIND_THEME_ITEM(Theme::DATA_TYPE_COLOR, OptionButton, font_color);
 	BIND_THEME_ITEM(Theme::DATA_TYPE_COLOR, OptionButton, font_focus_color);
