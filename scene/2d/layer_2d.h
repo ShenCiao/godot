@@ -56,11 +56,7 @@ private:
 	LayerBlendMode layer_blend_mode = LAYER_BLEND_MODE_DEFAULT;
 	CompositeMode composite_mode = COMPOSITE_MODE_AUTO;
 	bool clipping_mask = false;
-	bool composite_active = false;
-
-	bool _has_layer_material() const;
-	bool _needs_composite() const;
-	void _update_render_state();
+	void _update_layer_group();
 
 protected:
 	void _notification(int p_what);
@@ -81,8 +77,6 @@ public:
 
 	void set_clipping_mask(bool p_enabled);
 	bool is_clipping_mask() const;
-	virtual void set_self_modulate(const Color &p_self_modulate) override;
-	virtual void set_material(const Ref<Material> &p_material) override;
 
 	bool is_composite_active() const;
 

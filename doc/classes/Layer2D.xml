@@ -4,7 +4,9 @@
 		Represents a Ciallo compositing layer and enables offscreen rendering only when required.
 	</brief_description>
 	<description>
-		A [Layer2D] can render as an ordinary [Node2D] when its settings do not require a separate layer source. Settings such as layer opacity, non-default blending, clipping masks, a material on the layer, or [member composite_mode] set to [constant COMPOSITE_MODE_ALWAYS] enable the existing transparent CanvasGroup rendering path.
+		A [Layer2D] retains its layer identity while its children draw directly into the current target when no separate source is needed. The renderer selects transparent composition before drawing, using layer opacity, non-default blending, effective material, clipping relationships, local ordering, and [member composite_mode]. A default layer also composites when a sibling uses its combined result as a clipping base.
+		Child Z ordering is contained within this layer. A layer with content that needs a local ordering boundary uses transparent composition. This includes negative child Z indices used for onion-skin previews.
+		Clipping requires direct sibling layers to use [member CanvasItem.z_index] = [code]0[/code], [member CanvasItem.z_as_relative] = [code]true[/code], [member CanvasItem.show_behind_parent] = [code]false[/code], and [member CanvasItem.top_level] = [code]false[/code], with [member CanvasItem.y_sort_enabled] = [code]false[/code] on their parent. When clipping is combined with custom Z, absolute Z, drawing behind the parent, or Y sorting in the same sibling group, ordering takes priority: the renderer warns and ignores that group's clipping until the conflict is removed. Nested groups are evaluated independently.
 		[b]Note:[/b] This custom node is intended for the RD renderer path. The Compatibility renderer is outside the supported product boundary.
 	</description>
 	<members>
@@ -12,7 +14,7 @@
 			Sets the margin used to expand the transparent composite clearing rectangle.
 		</member>
 		<member name="clipping_mask" type="bool" setter="set_clipping_mask" getter="is_clipping_mask" default="false">
-			If [code]true[/code], marks this layer as a clipped layer whose clipping base is inferred from lower sibling layers.
+			If [code]true[/code], clips this layer to the nearest preceding direct sibling layer with clipping disabled. Sibling indices increase in back-to-front drawing order; Ciallo's layer panel displays that order in reverse. The base's complete alpha is preserved, including transparent holes. A missing or hidden base gives zero clipping coverage. Ordering conflicts suspend clipping without changing this property.
 		</member>
 		<member name="composite_mode" type="int" setter="set_composite_mode" getter="get_composite_mode" enum="Layer2D.CompositeMode" default="0">
 			Controls whether the layer selects compositing automatically or always uses the transparent CanvasGroup path.
@@ -28,7 +30,7 @@
 		<method name="is_composite_active" qualifiers="const">
 			<return type="bool" />
 			<description>
-				Returns [code]true[/code] when this layer currently uses the transparent composite path.
+				Returns [code]true[/code] if the renderer selected a separate source for this layer during its most recent visible canvas traversal. The value updates during rendering, not immediately when a property changes. When multiple viewports share the canvas, it reflects the most recent traversal of this layer.
 			</description>
 		</method>
 	</methods>

@@ -157,11 +157,101 @@ void RendererCanvasCull::_release_canvas_group_z_list_scratch(CanvasItemZListScr
 	canvas_group_z_list_scratch_depth--;
 }
 
-void RendererCanvasCull::_mark_layer_stacks(Item *p_parent, Item *const *p_items, int p_item_count) {
+void RendererCanvasCull::_prepare_layer_siblings(Item *p_parent, Item *const *p_items, int p_item_count) {
+	bool has_clipping = false;
+	bool invalid_order = p_parent != nullptr && p_parent->sort_y;
+	Item *warning_owner = p_parent;
+	for (int i = 0; i < p_item_count; i++) {
+		Item *item = p_items[i];
+		item->layer_source_required = false;
+		item->layer_clipping_enabled = false;
+		if (!item->is_layer) {
+			continue;
+		}
+		if (warning_owner == nullptr) {
+			warning_owner = item;
+		}
+		has_clipping |= item->clipping_mask;
+		invalid_order |= item->z_index != 0 || !item->z_relative || item->behind;
+	}
+
+	const bool conflict = has_clipping && invalid_order;
+	if (warning_owner != nullptr) {
+		bool &warning_emitted = p_parent != nullptr ? warning_owner->layer_order_warning_emitted : warning_owner->root_layer_order_warning_emitted;
+		if (conflict && !warning_emitted) {
+			WARN_PRINT("Clipping masks and custom sibling ordering cannot be combined. Canvas ordering takes priority and clipping is ignored for this sibling group. Clipping requires z_index = 0, z_as_relative = true, show_behind_parent = false, and y_sort_enabled = false on the parent.");
+		}
+		warning_emitted = conflict;
+	}
+	if (!has_clipping || conflict) {
+		return;
+	}
+
+	// Resolve relationships before culling: a default Layer2D may need a
+	// complete source solely because a later sibling clips to it.
+	Item *base = nullptr;
+	for (int i = 0; i < p_item_count; i++) {
+		Item *item = p_items[i];
+		if (!item->is_layer) {
+			continue;
+		}
+		if (!item->clipping_mask) {
+			base = item;
+		} else {
+			item->layer_clipping_enabled = true;
+			item->layer_source_required = true;
+			if (base != nullptr) {
+				base->layer_source_required = true;
+			}
+		}
+	}
+}
+
+bool RendererCanvasCull::_prepare_layer_tree(Item *p_item, Item *p_material_owner, uint32_t p_canvas_cull_mask) {
+	if (!p_item->visible || !(p_item->visibility_layer & p_canvas_cull_mask)) {
+		return false;
+	}
+	if (p_item->children_order_dirty) {
+		p_item->child_items.sort_custom<ItemIndexSort>();
+		p_item->children_order_dirty = false;
+	}
+	if (!p_item->use_parent_material || p_material_owner == nullptr) {
+		p_material_owner = p_item;
+	}
+
+	_prepare_layer_siblings(p_item, p_item->child_items.ptr(), p_item->child_items.size());
+	bool needs_order_boundary = p_item->sort_y;
+	for (Item *child : p_item->child_items) {
+		const bool child_order_escapes = _prepare_layer_tree(child, p_material_owner, p_canvas_cull_mask);
+		if (child->visible && (child->visibility_layer & p_canvas_cull_mask)) {
+			needs_order_boundary |= child_order_escapes || child->z_index != 0 || !child->z_relative || child->behind;
+		}
+	}
+
+	if (p_item->layer_group != nullptr) {
+		const bool composite = p_item->layer_group->always_composite || p_item->layer_source_required || needs_order_boundary ||
+				!p_item->self_modulate.is_equal_approx(Color(1, 1, 1, 1)) ||
+				p_item->layer_blend_mode != RS::CANVAS_ITEM_LAYER_BLEND_MODE_DEFAULT || p_material_owner->material.is_valid();
+		if (composite != (p_item->canvas_group != nullptr)) {
+			// The previous frame's generated group rectangle must never become
+			// an ordinary untextured draw when an automatic layer goes direct.
+			if (!composite && _has_only_generated_canvas_group_command(p_item)) {
+				p_item->clear();
+			}
+			canvas_item_set_canvas_group_mode(p_item->self, composite ? RS::CANVAS_GROUP_MODE_TRANSPARENT : RS::CANVAS_GROUP_MODE_DISABLED,
+					p_item->layer_group->clear_margin, true, p_item->layer_group->fit_margin, false);
+			_mark_ysort_dirty(p_item);
+		}
+	}
+
+	// Only ordering that is not already contained in a composited child
+	// needs to activate the nearest enclosing Layer2D's group path.
+	return needs_order_boundary && !_uses_transparent_canvas_group(p_item);
+}
+
+void RendererCanvasCull::_mark_layer_stacks(Item *const *p_items, int p_item_count) {
 	Item *base = nullptr;
 	RendererCanvasRender::Item *last_clipped_source = nullptr;
-	bool has_child_layers = false;
-	bool invalid_order = false;
 
 	auto close_stack = [&]() {
 		if (base != nullptr && last_clipped_source != nullptr) {
@@ -176,10 +266,7 @@ void RendererCanvasCull::_mark_layer_stacks(Item *p_parent, Item *const *p_items
 			continue;
 		}
 
-		has_child_layers = true;
-		invalid_order |= item->z_index != 0 || !item->z_relative || item->behind;
-
-		if (!item->clipping_mask) {
+		if (!item->layer_clipping_enabled) {
 			close_stack();
 			base = item;
 			item->orphaned_clipping_warning_emitted = false;
@@ -214,16 +301,6 @@ void RendererCanvasCull::_mark_layer_stacks(Item *p_parent, Item *const *p_items
 	}
 
 	close_stack();
-
-	if (p_parent != nullptr) {
-		invalid_order |= has_child_layers && p_parent->sort_y;
-		if (invalid_order && !p_parent->layer_order_error_emitted) {
-			ERR_PRINT("Layer siblings require z_index = 0, z_as_relative = true, show_behind_parent = false, and y_sort_enabled = false on their parent. Layer rendering is undefined for this configuration.");
-			p_parent->layer_order_error_emitted = true;
-		} else if (!invalid_order) {
-			p_parent->layer_order_error_emitted = false;
-		}
-	}
 }
 
 void RendererCanvasCull::_render_canvas_item_tree(RID p_to_render_target, Canvas::ChildItem *p_child_items, int p_child_item_count, const Transform2D &p_transform, const Rect2 &p_clip_rect, const Color &p_modulate, RendererCanvasRender::Light *p_lights, RendererCanvasRender::Light *p_directional_lights, RenderingServer::CanvasItemTextureFilter p_default_filter, RenderingServer::CanvasItemTextureRepeat p_default_repeat, bool p_snap_2d_vertices_to_pixel, uint32_t p_canvas_cull_mask, RenderingMethod::RenderInfo *r_render_info) {
@@ -237,16 +314,19 @@ void RendererCanvasCull::_render_canvas_item_tree(RID p_to_render_target, Canvas
 	memset(z_list, 0, z_range * sizeof(RendererCanvasRender::Item *));
 	memset(z_last_list, 0, z_range * sizeof(RendererCanvasRender::Item *));
 
-	for (int i = 0; i < p_child_item_count; i++) {
-		_cull_canvas_item(p_child_items[i].item, p_transform, p_clip_rect, Color(1, 1, 1, 1), 0, z_list, z_last_list, nullptr, nullptr, false, p_canvas_cull_mask, Point2(), 1, nullptr);
-	}
-
 	LocalVector<Item *> root_items;
 	root_items.resize(p_child_item_count);
 	for (int i = 0; i < p_child_item_count; i++) {
 		root_items[i] = p_child_items[i].item;
 	}
-	_mark_layer_stacks(nullptr, root_items.ptr(), root_items.size());
+	_prepare_layer_siblings(nullptr, root_items.ptr(), root_items.size());
+	for (Item *item : root_items) {
+		_prepare_layer_tree(item, nullptr, p_canvas_cull_mask);
+	}
+	for (Item *item : root_items) {
+		_cull_canvas_item(item, p_transform, p_clip_rect, Color(1, 1, 1, 1), 0, z_list, z_last_list, nullptr, nullptr, false, p_canvas_cull_mask, Point2(), 1, nullptr);
+	}
+	_mark_layer_stacks(root_items.ptr(), root_items.size());
 
 	RendererCanvasRender::Item *list = nullptr;
 	RendererCanvasRender::Item *list_end = nullptr;
@@ -391,7 +471,9 @@ void RendererCanvasCull::_attach_canvas_item_for_draw(RendererCanvasCull::Item *
 			// If nothing has been drawn, we just take it over and draw it ourselves.
 			if (ci->canvas_group->fit_empty && (ci->commands == nullptr || _has_only_generated_canvas_group_command(ci))) {
 				// No commands, or sole command is the one used to draw, so we (re)create the draw command.
+				RendererCanvasRender::Item *material_owner = ci->material_owner;
 				ci->clear();
+				ci->material_owner = material_owner;
 
 				if (rect_accum == Rect2()) {
 					rect_accum.size = Size2(1, 1);
@@ -654,7 +736,7 @@ void RendererCanvasCull::_cull_canvas_item(Item *p_canvas_item, const Transform2
 			}
 		}
 
-		_mark_layer_stacks(ci, ci->child_items.ptr(), ci->child_items.size());
+		_mark_layer_stacks(ci->child_items.ptr(), ci->child_items.size());
 
 		RendererCanvasRender::Item *local_first = nullptr;
 		RendererCanvasRender::Item *local_last = nullptr;
@@ -736,7 +818,7 @@ void RendererCanvasCull::_cull_canvas_item(Item *p_canvas_item, const Transform2
 		}
 	}
 
-	_mark_layer_stacks(ci, ci->child_items.ptr(), ci->child_items.size());
+	_mark_layer_stacks(ci->child_items.ptr(), ci->child_items.size());
 }
 
 void RendererCanvasCull::render_canvas(RID p_render_target, Canvas *p_canvas, const Transform2D &p_transform, RendererCanvasRender::Light *p_lights, RendererCanvasRender::Light *p_directional_lights, const Rect2 &p_clip_rect, RenderingServer::CanvasItemTextureFilter p_default_filter, RenderingServer::CanvasItemTextureRepeat p_default_repeat, bool p_snap_2d_transforms_to_pixel, bool p_snap_2d_vertices_to_pixel, uint32_t canvas_cull_mask, RenderingMethod::RenderInfo *r_render_info) {
@@ -2291,6 +2373,39 @@ void RendererCanvasCull::canvas_item_set_clipping_mask(RID p_item, bool p_enable
 	Item *canvas_item = canvas_item_owner.get_or_null(p_item);
 	ERR_FAIL_NULL(canvas_item);
 	canvas_item->clipping_mask = p_enabled;
+}
+
+void RendererCanvasCull::canvas_item_set_layer_group(RID p_item, bool p_enabled, bool p_always_composite, float p_fit_margin, float p_clear_margin) {
+	Item *canvas_item = canvas_item_owner.get_or_null(p_item);
+	ERR_FAIL_NULL(canvas_item);
+	if (!p_enabled) {
+		if (canvas_item->layer_group != nullptr) {
+			memdelete(canvas_item->layer_group);
+			canvas_item->layer_group = nullptr;
+			if (_has_only_generated_canvas_group_command(canvas_item)) {
+				canvas_item->clear();
+			}
+			canvas_item_set_canvas_group_mode(p_item, RS::CANVAS_GROUP_MODE_DISABLED);
+			_mark_ysort_dirty(canvas_item);
+		}
+		return;
+	}
+	if (canvas_item->layer_group == nullptr) {
+		canvas_item->layer_group = memnew(Item::LayerGroup);
+	}
+	canvas_item->layer_group->always_composite = p_always_composite;
+	canvas_item->layer_group->fit_margin = p_fit_margin;
+	canvas_item->layer_group->clear_margin = p_clear_margin;
+	if (canvas_item->canvas_group != nullptr) {
+		canvas_item->canvas_group->fit_margin = p_fit_margin;
+		canvas_item->canvas_group->clear_margin = p_clear_margin;
+	}
+}
+
+bool RendererCanvasCull::canvas_item_is_layer_composite_active(RID p_item) const {
+	const Item *canvas_item = const_cast<RendererCanvasCull *>(this)->canvas_item_owner.get_or_null(p_item);
+	ERR_FAIL_NULL_V(canvas_item, false);
+	return canvas_item->layer_group != nullptr && canvas_item->canvas_group != nullptr;
 }
 
 void RendererCanvasCull::canvas_item_set_canvas_group_mode(RID p_item, RS::CanvasGroupMode p_mode, float p_clear_margin, bool p_fit_empty, float p_fit_margin, bool p_blur_mipmaps) {

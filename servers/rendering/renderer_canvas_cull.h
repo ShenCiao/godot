@@ -62,7 +62,17 @@ public:
 		RendererCanvasRender::Item *layer_source_first = nullptr;
 		RendererCanvasRender::Item *layer_source_last = nullptr;
 		bool orphaned_clipping_warning_emitted = false;
-		bool layer_order_error_emitted = false;
+		bool layer_order_warning_emitted = false;
+		bool root_layer_order_warning_emitted = false;
+		bool layer_clipping_enabled = false;
+		bool layer_source_required = false;
+
+		struct LayerGroup {
+			bool always_composite = false;
+			float fit_margin = 10.0;
+			float clear_margin = 10.0;
+		};
+		LayerGroup *layer_group = nullptr;
 
 		Vector<Item *> child_items;
 
@@ -105,6 +115,12 @@ public:
 			dependency_tracker.userdata = this;
 			dependency_tracker.changed_callback = &RendererCanvasCull::_dependency_changed;
 			dependency_tracker.deleted_callback = &RendererCanvasCull::_dependency_deleted;
+		}
+
+		~Item() {
+			if (layer_group != nullptr) {
+				memdelete(layer_group);
+			}
 		}
 	};
 
@@ -215,7 +231,9 @@ private:
 	void _collect_ysort_children(RendererCanvasCull::Item *p_canvas_item, RendererCanvasCull::Item *p_material_owner, const Color &p_modulate, RendererCanvasCull::Item **r_items, int &r_index, int &r_ysort_children_count, int p_z, uint32_t p_canvas_cull_mask);
 	int _count_ysort_children(RendererCanvasCull::Item *p_canvas_item);
 	void _mark_ysort_dirty(RendererCanvasCull::Item *ysort_owner);
-	void _mark_layer_stacks(Item *p_parent, Item *const *p_items, int p_item_count);
+	void _mark_layer_stacks(Item *const *p_items, int p_item_count);
+	void _prepare_layer_siblings(Item *p_parent, Item *const *p_items, int p_item_count);
+	bool _prepare_layer_tree(Item *p_item, Item *p_material_owner, uint32_t p_canvas_cull_mask);
 
 	static constexpr int z_range = RS::CANVAS_ITEM_Z_MAX - RS::CANVAS_ITEM_Z_MIN + 1;
 
@@ -316,6 +334,8 @@ public:
 	void canvas_item_set_is_layer(RID p_item, bool p_is_layer);
 	void canvas_item_set_layer_blend_mode(RID p_item, RS::CanvasItemLayerBlendMode p_blend_mode);
 	void canvas_item_set_clipping_mask(RID p_item, bool p_enabled);
+	void canvas_item_set_layer_group(RID p_item, bool p_enabled, bool p_always_composite, float p_fit_margin, float p_clear_margin);
+	bool canvas_item_is_layer_composite_active(RID p_item) const;
 
 	void canvas_item_set_canvas_group_mode(RID p_item, RS::CanvasGroupMode p_mode, float p_clear_margin = 5.0, bool p_fit_empty = false, float p_fit_margin = 0.0, bool p_blur_mipmaps = false);
 

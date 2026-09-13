@@ -8,69 +8,20 @@
 
 #include "layer_2d.h"
 
-#include "scene/resources/material.h"
-
-bool Layer2D::_has_layer_material() const {
-	return get_material().is_valid();
-}
-
-bool Layer2D::_needs_composite() const {
-	if (composite_mode == COMPOSITE_MODE_ALWAYS) {
-		return true;
-	}
-
-	if (composite_mode != COMPOSITE_MODE_AUTO) {
-		return false;
-	}
-
-	if (!get_self_modulate().is_equal_approx(Color(1, 1, 1, 1))) {
-		return true;
-	}
-	if (layer_blend_mode != LAYER_BLEND_MODE_DEFAULT || clipping_mask) {
-		return true;
-	}
-	if (_has_layer_material()) {
-		return true;
-	}
-	return false;
-}
-
-void Layer2D::_update_render_state() {
-	const bool should_composite = _needs_composite();
-	if (composite_active == should_composite) {
-		if (composite_active) {
-			RS::get_singleton()->canvas_item_set_canvas_group_mode(get_canvas_item(), RS::CANVAS_GROUP_MODE_TRANSPARENT, clear_margin, true, fit_margin, false);
-			queue_redraw();
-		}
-		update_configuration_warnings();
-		return;
-	}
-
-	composite_active = should_composite;
-	RS::get_singleton()->canvas_item_set_is_layer(get_canvas_item(), composite_active);
-	RS::get_singleton()->canvas_item_set_canvas_group_mode(
-			get_canvas_item(),
-			composite_active ? RS::CANVAS_GROUP_MODE_TRANSPARENT : RS::CANVAS_GROUP_MODE_DISABLED,
-			clear_margin,
-			true,
-			fit_margin,
-			false);
-	queue_redraw();
-	update_configuration_warnings();
+void Layer2D::_update_layer_group() {
+	RS::get_singleton()->canvas_item_set_layer_group(get_canvas_item(), true, composite_mode == COMPOSITE_MODE_ALWAYS, fit_margin, clear_margin);
 }
 
 void Layer2D::_notification(int p_what) {
 	if (p_what == NOTIFICATION_ENTER_TREE || p_what == NOTIFICATION_CHILD_ORDER_CHANGED) {
-		_update_render_state();
+		update_configuration_warnings();
 	}
 }
 
 void Layer2D::set_fit_margin(real_t p_fit_margin) {
 	ERR_FAIL_COND(p_fit_margin < 0.0);
 	fit_margin = p_fit_margin;
-	if (composite_active) {
-		_update_render_state();
-	}
+	_update_layer_group();
 }
 
 real_t Layer2D::get_fit_margin() const {
@@ -80,9 +31,7 @@ real_t Layer2D::get_fit_margin() const {
 void Layer2D::set_clear_margin(real_t p_clear_margin) {
 	ERR_FAIL_COND(p_clear_margin < 0.0);
 	clear_margin = p_clear_margin;
-	if (composite_active) {
-		_update_render_state();
-	}
+	_update_layer_group();
 }
 
 real_t Layer2D::get_clear_margin() const {
@@ -96,7 +45,6 @@ void Layer2D::set_layer_blend_mode(LayerBlendMode p_blend_mode) {
 	}
 	layer_blend_mode = p_blend_mode;
 	RS::get_singleton()->canvas_item_set_layer_blend_mode(get_canvas_item(), RS::CanvasItemLayerBlendMode(layer_blend_mode));
-	_update_render_state();
 }
 
 Layer2D::LayerBlendMode Layer2D::get_layer_blend_mode() const {
@@ -109,7 +57,7 @@ void Layer2D::set_composite_mode(CompositeMode p_mode) {
 		return;
 	}
 	composite_mode = p_mode;
-	_update_render_state();
+	_update_layer_group();
 }
 
 Layer2D::CompositeMode Layer2D::get_composite_mode() const {
@@ -122,30 +70,19 @@ void Layer2D::set_clipping_mask(bool p_enabled) {
 	}
 	clipping_mask = p_enabled;
 	RS::get_singleton()->canvas_item_set_clipping_mask(get_canvas_item(), clipping_mask);
-	_update_render_state();
 }
 
 bool Layer2D::is_clipping_mask() const {
 	return clipping_mask;
 }
 
-void Layer2D::set_self_modulate(const Color &p_self_modulate) {
-	Node2D::set_self_modulate(p_self_modulate);
-	_update_render_state();
-}
-
-void Layer2D::set_material(const Ref<Material> &p_material) {
-	Node2D::set_material(p_material);
-	_update_render_state();
-}
-
 bool Layer2D::is_composite_active() const {
-	return composite_active;
+	return RS::get_singleton()->canvas_item_is_layer_composite_active(get_canvas_item());
 }
 
 PackedStringArray Layer2D::get_configuration_warnings() const {
 	PackedStringArray warnings = Node2D::get_configuration_warnings();
-	if (composite_active && is_inside_tree()) {
+	if (is_inside_tree()) {
 		Node *n = get_parent();
 		while (n) {
 			CanvasItem *as_canvas_item = Object::cast_to<CanvasItem>(n);
@@ -190,12 +127,13 @@ void Layer2D::_bind_methods() {
 }
 
 Layer2D::Layer2D() {
+	RS::get_singleton()->canvas_item_set_is_layer(get_canvas_item(), true);
 	RS::get_singleton()->canvas_item_set_layer_blend_mode(get_canvas_item(), RS::CanvasItemLayerBlendMode(layer_blend_mode));
 	RS::get_singleton()->canvas_item_set_clipping_mask(get_canvas_item(), clipping_mask);
-	_update_render_state();
+	_update_layer_group();
 }
 
 Layer2D::~Layer2D() {
-	RS::get_singleton()->canvas_item_set_canvas_group_mode(get_canvas_item(), RS::CANVAS_GROUP_MODE_DISABLED);
+	RS::get_singleton()->canvas_item_set_layer_group(get_canvas_item(), false, false, fit_margin, clear_margin);
 	RS::get_singleton()->canvas_item_set_is_layer(get_canvas_item(), false);
 }

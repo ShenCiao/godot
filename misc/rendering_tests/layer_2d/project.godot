@@ -1,0 +1,18 @@
+[application]
+
+config/name="Layer2D Rendering Regression"
+run/main_scene="res://main.tscn"
+
+[display]
+
+window/size/viewport_width=64
+window/size/viewport_height=64
+window/vsync/vsync_mode=0
+
+[physics]
+
+3d/physics_engine="Dummy"
+
+[rendering]
+
+rendering_device/driver.windows="d3d12"

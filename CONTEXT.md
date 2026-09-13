@@ -92,6 +92,8 @@ Rendering work in this repository targets the RD renderer path. The Compatibilit
 
 Canvas item Z indexing is intentionally narrowed to 256 global buckets (`-128` to `127`) for this custom build for less memory allocation for nested canvas groups.
 
+The [Layer rendering contract](docs/rendering/layer-system.md) is authoritative for Layer2D composition, local Z boundaries and sibling clipping conflicts.
+
 INSTANCE_TRANSFORM is the per-instance transform matrix exposed to a CanvasItem vertex shader for the currently drawn MultiMesh instance. Avoid using "model matrix" for this concept: INSTANCE_TRANSFORM is only the per-instance part, separate from the node or canvas item's model transform.
 
 ## Arrangement 2D

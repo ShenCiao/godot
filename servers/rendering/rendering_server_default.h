@@ -1028,6 +1028,8 @@ public:
 	FUNC2(canvas_item_set_is_layer, RID, bool)
 	FUNC2(canvas_item_set_layer_blend_mode, RID, CanvasItemLayerBlendMode)
 	FUNC2(canvas_item_set_clipping_mask, RID, bool)
+	FUNC5(canvas_item_set_layer_group, RID, bool, bool, float, float)
+	FUNC1RC(bool, canvas_item_is_layer_composite_active, RID)
 
 	FUNC6(canvas_item_set_canvas_group_mode, RID, CanvasGroupMode, float, bool, float, bool)
 

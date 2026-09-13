@@ -1637,6 +1637,8 @@ public:
 	virtual void canvas_item_set_is_layer(RID p_item, bool p_is_layer) = 0;
 	virtual void canvas_item_set_layer_blend_mode(RID p_item, CanvasItemLayerBlendMode p_blend_mode) = 0;
 	virtual void canvas_item_set_clipping_mask(RID p_item, bool p_enabled) = 0;
+	virtual void canvas_item_set_layer_group(RID p_item, bool p_enabled, bool p_always_composite, float p_fit_margin, float p_clear_margin) = 0;
+	virtual bool canvas_item_is_layer_composite_active(RID p_item) const = 0;
 
 	enum CanvasGroupMode {
 		CANVAS_GROUP_MODE_DISABLED,
