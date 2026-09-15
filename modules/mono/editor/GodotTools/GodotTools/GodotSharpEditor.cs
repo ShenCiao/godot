@@ -193,6 +193,11 @@ namespace GodotTools
             {
                 var project = ProjectUtils.Open(GodotSharpDirs.ProjectCsProjPath)
                               ?? throw new InvalidOperationException("Cannot open C# project.");
+                if (ProjectUtils.UsesExplicitGodotSdk(project))
+                {
+                    ShowErrorDialog("This project controls its SDK through explicit imports. Use its engine configuration workflow to select an editor and SDK.", "C# Project SDK");
+                    return;
+                }
                 if (ProjectUtils.UsesGlobalGodotSdk(project))
                 {
                     ShowErrorDialog("This project selects its Godot SDK in global.json. Update the published engine version there, then run the project's engine setup command.", "C# Project SDK");
@@ -247,21 +252,13 @@ namespace GodotTools
             {
                 var project = ProjectUtils.Open(GodotSharpDirs.ProjectCsProjPath)
                               ?? throw new InvalidOperationException("Cannot open C# project.");
+                // Explicit imports can select a local SDK during MSBuild evaluation.
+                // The project's configuration workflow owns that selection.
+                if (ProjectUtils.UsesExplicitGodotSdk(project))
+                    return;
+
                 string projectSdk = ProjectUtils.GetGodotSdkReference(project);
                 string editorSdk = ProjectGenerator.GodotSdkAttrValue;
-
-                if (LocalDevelopment.IsActive)
-                {
-                    if (ProjectUtils.HasImport(project, ProjectGenerator.GodotLocalDevelopmentPropsPath))
-                        return;
-
-                    _sdkMismatchDialog.Title = "Local C# Development Not Enabled".TTR();
-                    _sdkMismatchDialog.DialogText =
-                        "This local editor generated '.godot/mono/local_sdk.props', but the C# project does not import it.\n\n" +
-                        $"Add a conditional import for '{ProjectGenerator.GodotLocalDevelopmentPropsPath}' to the tracked .csproj file.";
-                    EditorInterface.Singleton.PopupDialogCentered(_sdkMismatchDialog);
-                    return;
-                }
 
                 if (string.Equals(projectSdk, editorSdk, StringComparison.OrdinalIgnoreCase))
                     return;
@@ -572,8 +569,6 @@ namespace GodotTools
             if (Instance != null)
                 throw new InvalidOperationException();
             Instance = this;
-
-            LocalDevelopment.Synchronize();
 
             var dotNetSdkSearchVersion = Environment.Version;
 

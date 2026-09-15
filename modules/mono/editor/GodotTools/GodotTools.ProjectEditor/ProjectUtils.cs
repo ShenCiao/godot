@@ -74,7 +74,7 @@ namespace GodotTools.ProjectEditor
         {
             var origRoot = project.Root;
 
-            if (!string.IsNullOrEmpty(origRoot.Sdk))
+            if (!string.IsNullOrEmpty(origRoot.Sdk) || UsesExplicitGodotSdk(project))
                 return;
 
             project.Root = ProjectGenerator.GenGameProject(projectName);
@@ -84,6 +84,9 @@ namespace GodotTools.ProjectEditor
 
         public static void EnsureGodotSdkIsUpToDate(MSBuildProject project)
         {
+            if (UsesExplicitGodotSdk(project))
+                return;
+
             var root = project.Root;
             string godotSdkAttrValue = ProjectGenerator.GodotSdkAttrValue;
 
@@ -142,7 +145,10 @@ namespace GodotTools.ProjectEditor
 
         public static string GetGodotSdkReference(MSBuildProject project)
         {
-            string sdk = project.Root.Sdk?.Trim() ?? string.Empty;
+            if (UsesExplicitGodotSdk(project))
+                return "Godot.NET.Sdk (explicit imports)";
+
+            string sdk = project.Root.Sdk.Trim();
             if (string.Equals(sdk, "Godot.NET.Sdk", StringComparison.OrdinalIgnoreCase))
             {
                 string? version = GetGlobalGodotSdkVersion(project.Root.FullPath);
@@ -154,8 +160,14 @@ namespace GodotTools.ProjectEditor
         public static bool UsesGlobalGodotSdk(MSBuildProject project)
             => string.Equals(project.Root.Sdk?.Trim(), "Godot.NET.Sdk", StringComparison.OrdinalIgnoreCase);
 
+        public static bool UsesExplicitGodotSdk(MSBuildProject project)
+            => project.Root.Imports.Any(import =>
+                string.Equals(import.Sdk, "Godot.NET.Sdk", StringComparison.OrdinalIgnoreCase));
+
         public static bool SetGodotSdkReference(MSBuildProject project, string sdk)
         {
+            if (UsesExplicitGodotSdk(project))
+                throw new InvalidOperationException("This project controls its SDK through explicit imports. Use its engine configuration workflow.");
             if (UsesGlobalGodotSdk(project))
                 throw new InvalidOperationException("Update the Godot SDK version in global.json and run the project's engine setup command.");
             sdk = sdk.Trim();
@@ -169,10 +181,6 @@ namespace GodotTools.ProjectEditor
             project.HasUnsavedChanges = true;
             return true;
         }
-
-        public static bool HasImport(MSBuildProject project, string importedProject)
-            => project.Root.Imports.Any(import =>
-                string.Equals(import.Project, importedProject, StringComparison.OrdinalIgnoreCase));
 
         private static void EnsureTargetFrameworkMatchesMinimumRequirement(MSBuildProject project)
         {

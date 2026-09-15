@@ -196,7 +196,7 @@ def run_msbuild(tools: ToolsLocation, sln: str, chdir_to: str, msbuild_args: lis
     return subprocess.call(args, env=msbuild_env, cwd=chdir_to)
 
 
-def build_godot_api(msbuild_tool, module_dir, output_dir, push_nupkgs_local, precision, no_deprecated, werror):
+def build_godot_api(msbuild_tool, module_dir, output_dir, precision, no_deprecated, werror):
     target_filenames = [
         "GodotSharp.dll",
         "GodotSharp.pdb",
@@ -215,8 +215,6 @@ def build_godot_api(msbuild_tool, module_dir, output_dir, push_nupkgs_local, pre
         targets = [os.path.join(editor_api_dir, filename) for filename in target_filenames]
 
         args = ["/restore", "/t:Build", "/p:Configuration=" + build_config, "/p:NoWarn=1591"]
-        if push_nupkgs_local:
-            args += ["/p:ClearNuGetLocalCache=true", "/p:PushNuGetToLocalSource=" + push_nupkgs_local]
         if precision == "double":
             args += ["/p:GodotFloat64=true"]
         if no_deprecated:
@@ -259,7 +257,7 @@ def build_godot_api(msbuild_tool, module_dir, output_dir, push_nupkgs_local, pre
     return 0
 
 
-def generate_sdk_package_versions(version_status_override=None):
+def generate_sdk_package_versions(local_development=False):
     # I can't believe importing files in Python is so convoluted when not
     # following the golden standard for packages/modules.
     import os
@@ -276,18 +274,15 @@ def generate_sdk_package_versions(version_status_override=None):
     version_info = get_version_info("")
     sys.path.remove(root_path)
 
-    if version_status_override:
-        version_info["status"] = version_status_override
+    if local_development:
+        version_info["status"] = "ciallo.local"
 
     version_str = "{major}.{minor}.{patch}".format(**version_info)
     version_status = version_info["status"]
     if version_status != "stable":  # Pre-release
         # If version was overridden to be e.g. "beta3", we insert a dot between
         # "beta" and "3" to follow SemVer 2.0.
-        # If the status already contains a dot (e.g. a custom build status like
-        # "ciallo.gabc1234" where the trailing segment is a git short hash), it is
-        # assumed to already be a valid SemVer pre-release identifier and is left
-        # as-is. Splitting it would mangle hashes that happen to end in digits.
+        # Dot-separated custom statuses are already SemVer prerelease identifiers.
         import re
 
         if "." not in version_status:
@@ -382,15 +377,11 @@ def update_local_development_files(module_dir, output_dir, enabled):
     for source_path in source_paths:
         shutil.copy2(source_path, target_dir)
 
-
-def get_local_development_version_status(module_dir, build_name):
-    repository_root = os.path.dirname(os.path.dirname(module_dir))
-    git_hash = subprocess.check_output(
-        ["git", "rev-parse", "--short=9", "HEAD"],
-        cwd=repository_root,
-        encoding="utf-8",
-    ).strip()
-    return f"{build_name}.g{git_hash}"
+    # Consumers import these files directly, alongside the matching API assemblies
+    # and source generator. The directory is stable across local rebuilds.
+    sdk_dir = os.path.join(target_dir, "Sdk")
+    shutil.copytree(os.path.join(module_dir, "editor", "Godot.NET.Sdk", "Godot.NET.Sdk", "Sdk"), sdk_dir)
+    shutil.copy2(os.path.join(module_dir, "SdkPackageVersions.props"), sdk_dir)
 
 
 def build_all(
@@ -399,22 +390,16 @@ def build_all(
     output_dir,
     godot_platform,
     dev_debug,
-    push_nupkgs_local,
     precision,
     no_deprecated,
     werror,
-    local_development_name,
+    local_development,
 ):
     # Generate SdkPackageVersions.props and VersionDocsUrl constant
-    local_version_status = (
-        get_local_development_version_status(module_dir, local_development_name) if local_development_name else None
-    )
-    generate_sdk_package_versions(local_version_status)
+    generate_sdk_package_versions(local_development)
 
     # Godot API
-    exit_code = build_godot_api(
-        msbuild_tool, module_dir, output_dir, push_nupkgs_local, precision, no_deprecated, werror
-    )
+    exit_code = build_godot_api(msbuild_tool, module_dir, output_dir, precision, no_deprecated, werror)
     if exit_code != 0:
         return exit_code
 
@@ -423,8 +408,6 @@ def build_all(
     args = ["/restore", "/t:Build", "/p:Configuration=" + ("Debug" if dev_debug else "Release")] + (
         ["/p:GodotPlatform=" + godot_platform] if godot_platform else []
     )
-    if push_nupkgs_local:
-        args += ["/p:ClearNuGetLocalCache=true", "/p:PushNuGetToLocalSource=" + push_nupkgs_local]
     if precision == "double":
         args += ["/p:GodotFloat64=true"]
     exit_code = run_msbuild(msbuild_tool, sln=sln, chdir_to=module_dir, msbuild_args=args)
@@ -433,8 +416,6 @@ def build_all(
 
     # Godot.NET.Sdk
     args = ["/restore", "/t:Build", "/p:Configuration=Release"]
-    if push_nupkgs_local:
-        args += ["/p:ClearNuGetLocalCache=true", "/p:PushNuGetToLocalSource=" + push_nupkgs_local]
     if precision == "double":
         args += ["/p:GodotFloat64=true"]
     if no_deprecated:
@@ -444,7 +425,7 @@ def build_all(
     if exit_code != 0:
         return exit_code
 
-    update_local_development_files(module_dir, output_dir, bool(local_development_name))
+    update_local_development_files(module_dir, output_dir, local_development)
 
     # Plain metadata for Git hook provisioning without executing the editor.
     import xml.etree.ElementTree as ET
@@ -472,7 +453,6 @@ def main():
     )
     parser.add_argument("--godot-platform", type=str, default="")
     parser.add_argument("--mono-prefix", type=str, default="")
-    parser.add_argument("--push-nupkgs-local", type=str, default="")
     parser.add_argument(
         "--precision", type=str, default="single", choices=["single", "double"], help="Floating-point precision level"
     )
@@ -485,9 +465,8 @@ def main():
     parser.add_argument("--werror", action="store_true", default=False, help="Treat compiler warnings as errors.")
     parser.add_argument(
         "--local-development",
-        metavar="BUILD_NAME",
-        default="",
-        help="Install local C# development files and version them as BUILD_NAME.g<git-hash>.",
+        action="store_true",
+        help="Emit a directly importable SDK, API references, and generator for local development.",
     )
 
     args = parser.parse_args()
@@ -496,8 +475,6 @@ def main():
     module_dir = os.path.abspath(os.path.join(this_script_dir, os.pardir))
 
     output_dir = os.path.abspath(args.godot_output_dir)
-
-    push_nupkgs_local = os.path.abspath(args.push_nupkgs_local) if args.push_nupkgs_local else None
 
     msbuild_tool = find_any_msbuild_tool(args.mono_prefix)
 
@@ -511,7 +488,6 @@ def main():
         output_dir,
         args.godot_platform,
         args.dev_debug,
-        push_nupkgs_local,
         args.precision,
         args.no_deprecated,
         args.werror,

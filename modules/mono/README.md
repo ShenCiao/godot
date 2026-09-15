@@ -13,36 +13,33 @@
 The paths specified in these examples assume the command is being run from
 the Godot source root.
 
-# How to deal with NuGet packages
+# Local C# development
 
-We distribute the API assemblies, our source generators, and our custom
-MSBuild project SDK as NuGet packages. This is all transparent to the user,
-but it can make things complicated during development.
-
-In order to use Godot with a development of those packages, we must create
-a local NuGet source where MSBuild can find them. This can be done with
-the .NET CLI:
-
-```sh
-dotnet nuget add source ~/MyLocalNugetSource --name MyLocalNugetSource
-```
-
-The Godot NuGet packages must be added to that local source. Additionally,
-we must make sure there are no other versions of the package in the NuGet
-cache, as MSBuild may pick one of those instead.
-
-In order to simplify this process, the `build_assemblies.py` script provides
-the following `--push-nupkgs-local` option:
+The VS Code `Build .NET Assemblies` task builds the managed tools with
+`--local-development`. The equivalent assembly build is:
 
 ```sh
 ./modules/mono/build_scripts/build_assemblies.py --godot-output-dir ./bin \
-    --push-nupkgs-local ~/MyLocalNugetSource
+    --local-development
 ```
 
-This option ensures the packages will be added to the specified local NuGet
-source and that conflicting versions of the package are removed from the
-NuGet cache. It's recommended to always use this option when building the
-C# solutions during development to avoid mistakes.
+The editor output contains a fixed `GodotSharp/Tools/LocalDevelopment` directory:
+
+- `Sdk/` contains the complete MSBuild SDK props and targets.
+- `Godot.LocalDevelopment.props` references the matching API assemblies under
+  `GodotSharp/Api` and the source generator beside the props file.
+- `SdkPackageVersions.props` records the diagnostic package version and Godot constants.
+
+A consuming project selects a local editor explicitly and stores its path in ignored
+machine configuration. It reads that configuration before importing the SDK, imports
+the local `Sdk.props`, then `Godot.LocalDevelopment.props`, and finally `Sdk.targets`.
+The local version label is `<Godot version>-ciallo.local`; SDK selection uses the path.
+Rebuilding in the same directory updates the next command-line build. Reload an IDE's
+C# project or language service when it retains loaded assemblies or generators.
+
+Published mode uses the team's SDK version through standard MSBuild resolution.
+The editor preserves projects that use explicit `Sdk="Godot.NET.Sdk"` imports and
+leaves their SDK selection to the project's configuration workflow.
 
 # Double Precision Support (REAL_T_IS_DOUBLE)
 
@@ -51,5 +48,5 @@ Follow the above instructions but build Godot with the precision=double argument
 When building the NuGet packages, specify `--precision=double` - for example:
 ```sh
 ./modules/mono/build_scripts/build_assemblies.py --godot-output-dir ./bin \
-    --push-nupkgs-local ~/MyLocalNugetSource --precision=double
+    --local-development --precision=double
 ```
