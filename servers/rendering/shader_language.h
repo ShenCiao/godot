@@ -94,6 +94,7 @@ public:
 		TK_TYPE_SAMPLEREXT,
 		TK_INTERPOLATION_FLAT,
 		TK_INTERPOLATION_SMOOTH,
+		TK_INTERPOLATION_CENTROID,
 		TK_CONST,
 		TK_STRUCT,
 		TK_PRECISION_LOW,
@@ -253,6 +254,7 @@ public:
 	enum DataInterpolation {
 		INTERPOLATION_FLAT,
 		INTERPOLATION_SMOOTH,
+		INTERPOLATION_CENTROID,
 		INTERPOLATION_DEFAULT,
 	};
 
@@ -1008,6 +1010,7 @@ private:
 	};
 
 	RBMap<StringName, CallInfo> calls_info;
+	HashMap<StringName, TkPos> explicitly_interpolated_varyings;
 
 #ifdef DEBUG_ENABLED
 	struct Usage {

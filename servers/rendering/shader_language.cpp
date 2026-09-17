@@ -131,6 +131,7 @@ const char *ShaderLanguage::token_names[TK_MAX] = {
 	"TYPE_SAMPLEREXT",
 	"INTERPOLATION_FLAT",
 	"INTERPOLATION_SMOOTH",
+	"INTERPOLATION_CENTROID",
 	"CONST",
 	"STRUCT",
 	"PRECISION_LOW",
@@ -323,6 +324,7 @@ const ShaderLanguage::KeyWord ShaderLanguage::keyword_list[] = {
 
 	{ TK_INTERPOLATION_FLAT, "flat", CF_INTERPOLATION_QUALIFIER, {}, {} },
 	{ TK_INTERPOLATION_SMOOTH, "smooth", CF_INTERPOLATION_QUALIFIER, {}, {} },
+	{ TK_INTERPOLATION_CENTROID, "centroid", CF_INTERPOLATION_QUALIFIER, {}, {} },
 
 	// precision modifiers
 
@@ -1043,12 +1045,15 @@ ShaderLanguage::DataType ShaderLanguage::get_token_datatype(TokenType p_type) {
 bool ShaderLanguage::is_token_interpolation(TokenType p_type) {
 	return (
 			p_type == TK_INTERPOLATION_FLAT ||
-			p_type == TK_INTERPOLATION_SMOOTH);
+			p_type == TK_INTERPOLATION_SMOOTH ||
+			p_type == TK_INTERPOLATION_CENTROID);
 }
 
 ShaderLanguage::DataInterpolation ShaderLanguage::get_token_interpolation(TokenType p_type) {
 	if (p_type == TK_INTERPOLATION_FLAT) {
 		return INTERPOLATION_FLAT;
+	} else if (p_type == TK_INTERPOLATION_CENTROID) {
+		return INTERPOLATION_CENTROID;
 	} else {
 		return INTERPOLATION_SMOOTH;
 	}
@@ -1098,6 +1103,8 @@ String ShaderLanguage::get_interpolation_name(DataInterpolation p_interpolation)
 			return "flat";
 		case INTERPOLATION_SMOOTH:
 			return "smooth";
+		case INTERPOLATION_CENTROID:
+			return "centroid";
 		default:
 			break;
 	}
@@ -1312,6 +1319,7 @@ void ShaderLanguage::clear() {
 
 	include_markers_handled.clear();
 	calls_info.clear();
+	explicitly_interpolated_varyings.clear();
 	function_overload_count.clear();
 
 #ifdef DEBUG_ENABLED
@@ -3331,6 +3339,20 @@ const ShaderLanguage::BuiltinFuncDef ShaderLanguage::builtin_func_defs[] = {
 	{ "textureQueryLevels", TYPE_INT, { TYPE_USAMPLER3D }, { "sampler" }, TAG_GLOBAL, true },
 	{ "textureQueryLevels", TYPE_INT, { TYPE_SAMPLERCUBE }, { "sampler" }, TAG_GLOBAL, true },
 
+	// Explicit interpolation of fragment input varyings.
+	{ "interpolateAtCentroid", TYPE_FLOAT, { TYPE_FLOAT, TYPE_VOID }, { "interpolant" }, TAG_GLOBAL, true },
+	{ "interpolateAtCentroid", TYPE_VEC2, { TYPE_VEC2, TYPE_VOID }, { "interpolant" }, TAG_GLOBAL, true },
+	{ "interpolateAtCentroid", TYPE_VEC3, { TYPE_VEC3, TYPE_VOID }, { "interpolant" }, TAG_GLOBAL, true },
+	{ "interpolateAtCentroid", TYPE_VEC4, { TYPE_VEC4, TYPE_VOID }, { "interpolant" }, TAG_GLOBAL, true },
+	{ "interpolateAtSample", TYPE_FLOAT, { TYPE_FLOAT, TYPE_INT, TYPE_VOID }, { "interpolant", "sample" }, TAG_GLOBAL, true },
+	{ "interpolateAtSample", TYPE_VEC2, { TYPE_VEC2, TYPE_INT, TYPE_VOID }, { "interpolant", "sample" }, TAG_GLOBAL, true },
+	{ "interpolateAtSample", TYPE_VEC3, { TYPE_VEC3, TYPE_INT, TYPE_VOID }, { "interpolant", "sample" }, TAG_GLOBAL, true },
+	{ "interpolateAtSample", TYPE_VEC4, { TYPE_VEC4, TYPE_INT, TYPE_VOID }, { "interpolant", "sample" }, TAG_GLOBAL, true },
+	{ "interpolateAtOffset", TYPE_FLOAT, { TYPE_FLOAT, TYPE_VEC2, TYPE_VOID }, { "interpolant", "offset" }, TAG_GLOBAL, true },
+	{ "interpolateAtOffset", TYPE_VEC2, { TYPE_VEC2, TYPE_VEC2, TYPE_VOID }, { "interpolant", "offset" }, TAG_GLOBAL, true },
+	{ "interpolateAtOffset", TYPE_VEC3, { TYPE_VEC3, TYPE_VEC2, TYPE_VOID }, { "interpolant", "offset" }, TAG_GLOBAL, true },
+	{ "interpolateAtOffset", TYPE_VEC4, { TYPE_VEC4, TYPE_VEC2, TYPE_VOID }, { "interpolant", "offset" }, TAG_GLOBAL, true },
+
 	// dFdx
 
 	{ "dFdx", TYPE_FLOAT, { TYPE_FLOAT, TYPE_VOID }, { "p" }, TAG_GLOBAL, false },
@@ -3557,6 +3579,9 @@ const ShaderLanguage::BuiltinFuncConstArgs ShaderLanguage::builtin_func_const_ar
 };
 
 const ShaderLanguage::BuiltinEntry ShaderLanguage::frag_only_func_defs[] = {
+	{ "interpolateAtCentroid" },
+	{ "interpolateAtSample" },
+	{ "interpolateAtOffset" },
 	{ "dFdx" },
 	{ "dFdxCoarse" },
 	{ "dFdxFine" },
@@ -3697,6 +3722,40 @@ bool ShaderLanguage::_validate_function_call(BlockNode *p_block, const FunctionI
 							}
 							constarg_idx++;
 						}
+					}
+
+					if (name == "interpolateAtCentroid" || name == "interpolateAtSample" || name == "interpolateAtOffset") {
+						// GLSL interpolation functions require an input l-value, not a copy
+						// of its value. Keep that constraint in the language diagnostics.
+						const Node *interpolant = p_func->arguments[1];
+						while (interpolant->type == Node::NODE_TYPE_MEMBER) {
+							const MemberNode *member = static_cast<const MemberNode *>(interpolant);
+							if (member->call_expression || member->assign_expression) {
+								break;
+							}
+							interpolant = member->owner;
+						}
+						StringName varying_name;
+						if (interpolant->type == Node::NODE_TYPE_VARIABLE) {
+							const VariableNode *variable = static_cast<const VariableNode *>(interpolant);
+							if (!variable->is_local) {
+								varying_name = variable->name;
+							}
+						} else if (interpolant->type == Node::NODE_TYPE_ARRAY) {
+							const ArrayNode *array = static_cast<const ArrayNode *>(interpolant);
+							if (!array->is_local && array->index_expression && !array->call_expression && !array->assign_expression) {
+								varying_name = array->name;
+							}
+						}
+						if (!shader->varyings.has(varying_name) || p_func->arguments[1]->get_array_size() != 0) {
+							_set_error(vformat(RTR("The first argument of '%s' must be a floating-point input varying, or a component or array element of one."), name));
+							return false;
+						}
+						if (shader->varyings[varying_name].interpolation == INTERPOLATION_FLAT) {
+							_set_error(vformat(RTR("Function '%s' cannot interpolate a flat varying."), name));
+							return false;
+						}
+						explicitly_interpolated_varyings.insert(varying_name, _get_tkpos());
 					}
 
 					//make sure its not an out argument used in the wrong way
@@ -5504,14 +5563,14 @@ bool ShaderLanguage::_validate_restricted_func(const StringName &p_name, const C
 		}
 	}
 
-	if (!p_func_info->uses_restricted_items.is_empty()) {
-		const Pair<StringName, CallInfo::Item> &first_element = p_func_info->uses_restricted_items.get(0);
-
+	for (const Pair<StringName, CallInfo::Item> &first_element : p_func_info->uses_restricted_items) {
 		if (first_element.second.type == CallInfo::Item::ITEM_TYPE_VARYING) {
 			const ShaderNode::Varying &varying = shader->varyings[first_element.first];
 
 			if (varying.stage == ShaderNode::Varying::STAGE_VERTEX) {
-				return true;
+				// Reading a vertex varying is allowed, but a later item can still
+				// be a fragment-only function (including through a helper call).
+				continue;
 			}
 		}
 
@@ -11030,6 +11089,16 @@ Error ShaderLanguage::_parse_shader(const HashMap<StringName, FunctionInfo> &p_f
 	}
 
 	for (const KeyValue<StringName, ShaderNode::Varying> &kv : shader->varyings) {
+		if (explicitly_interpolated_varyings.has(kv.key) && kv.value.stage != ShaderNode::Varying::STAGE_VERTEX) {
+			_set_tkpos(explicitly_interpolated_varyings[kv.key]);
+			_set_error(vformat(RTR("Explicit interpolation requires varying '%s' to be assigned in the vertex processor."), kv.key));
+			return ERR_PARSE_ERROR;
+		}
+		if (kv.value.interpolation == INTERPOLATION_CENTROID && kv.value.stage == ShaderNode::Varying::STAGE_FRAGMENT) {
+			_set_tkpos(kv.value.tkpos);
+			_set_error(RTR("Centroid interpolation is only supported for vertex-to-fragment varyings."));
+			return ERR_PARSE_ERROR;
+		}
 		if (kv.value.stage != ShaderNode::Varying::STAGE_FRAGMENT && (kv.value.type > TYPE_BVEC4 && kv.value.type < TYPE_FLOAT) && kv.value.interpolation != INTERPOLATION_FLAT) {
 			_set_tkpos(kv.value.tkpos);
 			_set_error(vformat(RTR("Varying with integer data type must be declared with `%s` interpolation qualifier."), "flat"));

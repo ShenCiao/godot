@@ -127,6 +127,8 @@ static String _interpstr(SL::DataInterpolation p_interp) {
 	switch (p_interp) {
 		case SL::INTERPOLATION_FLAT:
 			return "flat ";
+		case SL::INTERPOLATION_CENTROID:
+			return "centroid ";
 		case SL::INTERPOLATION_SMOOTH:
 			return "";
 		case SL::INTERPOLATION_DEFAULT:
