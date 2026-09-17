@@ -3518,7 +3518,11 @@ void TextureStorage::_clear_render_target_canvas_group_buffer(RenderTarget::Canv
 	if (r_buffer.texture.is_valid()) {
 		RD::get_singleton()->free_rid(r_buffer.texture);
 	}
+	if (r_buffer.color_multisample.is_valid()) {
+		RD::get_singleton()->free_rid(r_buffer.color_multisample);
+	}
 	r_buffer.texture = RID();
+	r_buffer.color_multisample = RID();
 	r_buffer.framebuffer = RID();
 	r_buffer.mipmap0 = RID();
 	r_buffer.mipmaps.clear();
@@ -3761,10 +3765,26 @@ void TextureStorage::_create_render_target_canvas_group_buffer(RenderTarget *rt,
 	buffer.mipmap0 = RD::get_singleton()->texture_create_shared_from_slice(RD::TextureView(), buffer.texture, 0, 0);
 	RD::get_singleton()->set_resource_name(buffer.mipmap0, "Canvas Group Buffer slice mipmap 0");
 
-	{
-		Vector<RID> fb_tex;
-		fb_tex.push_back(buffer.mipmap0);
-		buffer.framebuffer = RD::get_singleton()->framebuffer_create(fb_tex);
+	if (rt->msaa != RS::VIEWPORT_MSAA_DISABLED) {
+		// Use the same sample count and color-attachment usage as the Viewport.
+		RD::TextureFormat multisample_format = tf;
+		multisample_format.samples = RD::get_singleton()->texture_get_format(rt->color_multisample).samples;
+		multisample_format.mipmaps = 1;
+		multisample_format.usage_bits = render_target_get_color_usage_bits(true);
+		buffer.color_multisample = RD::get_singleton()->texture_create(multisample_format, RD::TextureView());
+		ERR_FAIL_COND(buffer.color_multisample.is_null());
+		RD::get_singleton()->set_resource_name(buffer.color_multisample, "Canvas Group MSAA Buffer");
+
+		// Resolve through the standard RD render pass, just like the Viewport.
+		// Explicit attachment roles keep the result texture usable by mipmap
+		// raster passes, which must treat its other slices as ordinary attachments.
+		RD::FramebufferPass pass;
+		pass.color_attachments.push_back(0);
+		pass.resolve_attachments.push_back(1);
+		buffer.framebuffer = FramebufferCacheRD::get_singleton()->get_cache_multipass(
+				{ buffer.color_multisample, buffer.mipmap0 }, { pass });
+	} else {
+		buffer.framebuffer = FramebufferCacheRD::get_singleton()->get_cache(buffer.mipmap0);
 	}
 
 	for (uint32_t i = 1; i < mipmaps_required; i++) {
@@ -3966,6 +3986,12 @@ void TextureStorage::render_target_set_msaa(RID p_render_target, RS::ViewportMSA
 		return;
 	}
 
+	// Sample-count changes invalidate every pooled target, including slots no
+	// longer in use after the layer nesting becomes shallower.
+	for (RenderTarget::CanvasGroupBuffer &buffer : rt->canvas_group_buffers) {
+		_clear_render_target_canvas_group_buffer(buffer);
+	}
+	rt->canvas_group_buffers.clear();
 	rt->msaa = p_msaa;
 	_update_render_target(rt);
 }
@@ -4582,20 +4608,28 @@ TextureStorage::CanvasGroupBufferRIDs TextureStorage::render_target_prepare_canv
 
 	Rect2i region;
 	if (_render_target_get_clamped_region(rt, p_region, region)) {
-		// RD hazard workaround:
-		// Not using a framebuffer attachment clear for this. CanvasGroup children
-		// render through buffer.mipmap0, a shared slice view, but the group is later
-		// composited by sampling buffer.texture, the owner texture. Relying on a
-		// render-pass loadOp clear for the slice seems leave a GPU resource hazard where
-		// the clear is not reliably visible to the later owner-texture sample.
-		// Clear the texture view explicitly for workaround.
-		// Not tried add_synchronization(), may be too blunt and hurt performance
-		CopyEffects *copy_effects = CopyEffects::get_singleton();
-		ERR_FAIL_NULL_V(copy_effects, result);
-		if (RendererSceneRenderRD::get_singleton()->_render_buffers_can_be_storage()) {
-			copy_effects->set_color(buffer.mipmap0, p_clear_color, region, !rt->use_hdr);
+		if (buffer.color_multisample.is_valid()) {
+			// Clear every sample, then resolve even if the group has no draw calls.
+			// Later passes load/store this attachment so nested groups can suspend
+			// and resume their parent without losing its per-sample contents.
+			RD::get_singleton()->draw_list_begin(buffer.framebuffer, RD::DRAW_CLEAR_COLOR_0, { p_clear_color }, 1.0f, 0, region);
+			RD::get_singleton()->draw_list_end();
 		} else {
-			copy_effects->set_color_raster(buffer.mipmap0, p_clear_color, region);
+			// RD hazard workaround:
+			// Not using a framebuffer attachment clear for this. CanvasGroup children
+			// render through buffer.mipmap0, a shared slice view, but the group is later
+			// composited by sampling buffer.texture, the owner texture. Relying on a
+			// render-pass loadOp clear for the slice seems leave a GPU resource hazard where
+			// the clear is not reliably visible to the later owner-texture sample.
+			// Clear the texture view explicitly for workaround.
+			// Not tried add_synchronization(), may be too blunt and hurt performance
+			CopyEffects *copy_effects = CopyEffects::get_singleton();
+			ERR_FAIL_NULL_V(copy_effects, result);
+			if (RendererSceneRenderRD::get_singleton()->_render_buffers_can_be_storage()) {
+				copy_effects->set_color(buffer.mipmap0, p_clear_color, region, !rt->use_hdr);
+			} else {
+				copy_effects->set_color_raster(buffer.mipmap0, p_clear_color, region);
+			}
 		}
 	}
 

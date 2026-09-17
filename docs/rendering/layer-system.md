@@ -34,6 +34,32 @@ composition. The RD backend obtains textures from the existing scratch-buffer po
 Changes take effect on the next render. `is_composite_active()` reports the most
 recent visible canvas traversal, including when multiple viewports share a canvas.
 
+## Viewport MSAA
+
+Layer2D, CanvasGroup and clipping-stack offscreen targets use the active Viewport's
+`msaa_2d` setting. A canvas shared by multiple Viewports uses each Viewport's own
+sample count and buffer pool. The ProjectSettings default does not override an
+explicit SubViewport setting.
+
+With MSAA enabled, each pooled slot has a multisample color attachment and an
+ordinary resolved texture. Both use the Viewport's color format, including HDR.
+The standard RenderingDevice render pass resolves the color before a group is
+sampled for composition. The source exposed as `TEXTURE` remains a single-sample,
+associated-alpha texture. Nested passes preserve the parent's multisample content
+until drawing resumes. Empty and reused slots are cleared to transparent.
+
+Changing `msaa_2d` releases pooled attachments, including currently unused slots;
+they are allocated again on demand. Disabling MSAA uses the single-sample path.
+Viewport growth and HDR changes recreate matching attachments, while ordinary
+resizes within existing capacity reuse storage. Sequential groups reuse slots;
+simultaneously nested groups require separate multisample attachments. GPU memory
+and resolve bandwidth therefore depend on Viewport size, sample count and nesting.
+
+Every group is resolved at its composition boundary. MSAA antialiases the source
+geometry; the group material samples its resolved image. This preserves the
+isolated-layer semantics, rather than retaining per-sample coverage through the
+entire layer hierarchy.
+
 ## Opacity, Materials and Blending
 
 `self_modulate.a` supplies Layer Opacity through `COLOR`. For composited Layer2D,
@@ -112,5 +138,6 @@ users from creating these conflicting combinations.
 ## Verification
 
 Run the [GPU regression project](../../misc/rendering_tests/layer_2d/README.md)
-to check pixels, state transitions and 10,000-layer direct rendering.
+to check pixels, state transitions, 10,000-layer direct rendering, and offscreen
+MSAA across nested groups, clipping stacks and independent Viewports.
 Architecture rationale is recorded in [ADR 0002](../adr/0002-layer2d-rendering-policy.md).

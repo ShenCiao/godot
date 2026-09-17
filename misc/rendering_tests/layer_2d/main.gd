@@ -24,6 +24,8 @@ func _ready() -> void:
 	viewport.transparent_bg = true
 	viewport.disable_3d = true
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	if "--msaa-4x" in OS.get_cmdline_user_args():
+		viewport.msaa_2d = SubViewport.MSAA_4X
 	add_child(viewport)
 	await _test_opacity_and_material()
 	await _test_default_base()

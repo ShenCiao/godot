@@ -1,6 +1,7 @@
 # Ciallo custom godot
 
 Bug fixes:
+- CanvasGroup offscreen rendering respects `Viewport.msaa_2d`, including nested groups and runtime MSAA changes.
 - Fix dialog placement on multi-monitor setups: `Window.initial_position` is applied only the first time a `Window` instance is shown, reopening it preserves the user's latest position and size, and an explicit `popup(Rect2i)` still takes precedence. Off-screen fallback centering now also respects each display's virtual desktop origin.
 - Preserve captured Godot object references across C# editor assembly reloads, including internal controls such as `SpinBoxLineEdit`. See [C# delegate captures during editor reload](#c-delegate-captures-during-editor-reload).
 - Use consistent StyleBox margins for Button-family measurement and content placement. `align_to_largest_stylebox` selects either stable maximum margins or the current state's margins; state changes invalidate layout sizes before button signals run. Check and option icons reserve space using the same sizing rules, OptionButton caches content independently of state padding, and vertical icon layouts count text height once. See [Button's theme and property reference](doc/classes/Button.xml).
@@ -10,7 +11,7 @@ Features:
 - Touch as individual event, separated from mouse event on Windows
 - Add CGAL Arrangement2D
 - Add `INSTANCE_TRANSFORM` canvas_item vertex shader builtin for reading the current MultiMesh instance transform. When a canvas_item shader reads `INSTANCE_TRANSFORM`, the 2D MultiMesh instance transform is not folded into `MODEL_MATRIX`; the shader owns how to apply or repurpose it. (This tortured me a whole freaking year.)
-- [Layer2D/Sprite2D rendering](docs/rendering/layer-system.md) with automatic composition, local Z ordering, opacity, blend modes, clipping masks and custom shaders.
+- [Layer2D/Sprite2D layers](docs/rendering/layer-system.md) with automatic composition, local Z ordering, opacity, blend modes, clipping masks, custom shaders and Viewport MSAA.
 - [Centroid and explicit fragment interpolation](docs/rendering/shader-interpolation.md) for precise shader input sampling with MSAA.
 - Spinbox add max display decimals
 - Runtime `FileDialog` nodes always use the operating system's native file dialog.

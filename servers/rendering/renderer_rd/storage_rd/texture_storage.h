@@ -391,6 +391,7 @@ private:
 
 		struct CanvasGroupBuffer {
 			RID texture;
+			RID color_multisample;
 			RID framebuffer;
 			RID mipmap0;
 			Vector<RID> mipmaps;
