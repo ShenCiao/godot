@@ -128,10 +128,12 @@ void MenuBar::_open_popup(int p_index, bool p_focus_item) {
 		return;
 	}
 
-	Rect2 item_rect = _get_menu_item_rect(p_index);
-	Size2 canvas_scale = get_canvas_transform().get_scale();
-	Point2 screen_pos = get_screen_position() + item_rect.position * canvas_scale;
-	Size2 screen_size = item_rect.size * canvas_scale;
+	Rect2 item_rect = get_screen_transform().xform(_get_menu_item_rect(p_index));
+	if (get_viewport()->is_embedding_subwindows() && pm->get_force_native()) {
+		item_rect = get_viewport()->get_popup_base_transform_native().xform(item_rect);
+	}
+	Point2 screen_pos = item_rect.position;
+	Size2 screen_size = item_rect.size;
 
 	active_menu = p_index;
 
