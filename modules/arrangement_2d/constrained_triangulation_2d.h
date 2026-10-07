@@ -2,6 +2,7 @@
 
 #include "core/object/ref_counted.h"
 #include "core/variant/dictionary.h"
+#include "core/variant/type_info.h"
 #include "core/variant/variant.h"
 
 // Immutable CDT snapshot. Build and query on an owning thread; retain a reference

@@ -30,8 +30,12 @@
 
 #include "sprite_2d.h"
 
-#include "core/input/input.h"
+#include "core/config/engine.h"
+#include "core/object/callable_mp.h"
+#include "core/object/class_db.h"
 #include "scene/main/viewport.h"
+#include "servers/display/accessibility_server.h"
+#include "servers/rendering/rendering_server.h"
 
 #ifdef TOOLS_ENABLED
 Dictionary Sprite2D::_edit_get_state() const {
@@ -150,9 +154,9 @@ void Sprite2D::_notification(int p_what) {
 
 			Rect2 dst_rect = get_rect();
 
-			DisplayServer::get_singleton()->accessibility_update_set_role(ae, DisplayServer::AccessibilityRole::ROLE_IMAGE);
-			DisplayServer::get_singleton()->accessibility_update_set_transform(ae, get_transform());
-			DisplayServer::get_singleton()->accessibility_update_set_bounds(ae, dst_rect);
+			AccessibilityServer::get_singleton()->update_set_role(ae, AccessibilityServerEnums::AccessibilityRole::ROLE_IMAGE);
+			AccessibilityServer::get_singleton()->update_set_transform(ae, get_transform());
+			AccessibilityServer::get_singleton()->update_set_bounds(ae, dst_rect);
 		} break;
 
 		case NOTIFICATION_DRAW: {
@@ -468,9 +472,7 @@ void Sprite2D::_validate_property(PropertyInfo &p_property) const {
 		p_property.hint = PROPERTY_HINT_RANGE;
 		p_property.hint_string = "0," + itos(vframes * hframes - 1) + ",1";
 		p_property.usage |= PROPERTY_USAGE_KEYING_INCREMENTS;
-	}
-
-	if (p_property.name == "frame_coords") {
+	} else if (p_property.name == "frame_coords") {
 		p_property.usage |= PROPERTY_USAGE_KEYING_INCREMENTS;
 	}
 }
@@ -495,7 +497,7 @@ void Sprite2D::set_layer_blend_mode(LayerBlendMode p_blend_mode) {
 		return;
 	}
 	layer_blend_mode = p_blend_mode;
-	RS::get_singleton()->canvas_item_set_layer_blend_mode(get_canvas_item(), RS::CanvasItemLayerBlendMode(layer_blend_mode));
+	RS::get_singleton()->canvas_item_set_layer_blend_mode(get_canvas_item(), RSE::CanvasItemLayerBlendMode(layer_blend_mode));
 }
 
 Sprite2D::LayerBlendMode Sprite2D::get_layer_blend_mode() const {
@@ -565,7 +567,7 @@ void Sprite2D::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "layer_blend_mode", PROPERTY_HINT_ENUM, "Default,Normal,Add,Multiply"), "set_layer_blend_mode", "get_layer_blend_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "clipping_mask"), "set_clipping_mask", "is_clipping_mask");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "set_texture", "get_texture");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "texture", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_texture", "get_texture");
 	ADD_GROUP("Offset", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "centered"), "set_centered", "is_centered");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "offset", PROPERTY_HINT_NONE, "suffix:px"), "set_offset", "get_offset");
@@ -591,7 +593,7 @@ void Sprite2D::_bind_methods() {
 
 Sprite2D::Sprite2D() {
 	RS::get_singleton()->canvas_item_set_is_layer(get_canvas_item(), true);
-	RS::get_singleton()->canvas_item_set_layer_blend_mode(get_canvas_item(), RS::CanvasItemLayerBlendMode(layer_blend_mode));
+	RS::get_singleton()->canvas_item_set_layer_blend_mode(get_canvas_item(), RSE::CanvasItemLayerBlendMode(layer_blend_mode));
 	RS::get_singleton()->canvas_item_set_clipping_mask(get_canvas_item(), clipping_mask);
 	if (Engine::get_singleton()->is_editor_hint()) {
 		add_user_signal(MethodInfo("_editor_region_rect_enabled"));

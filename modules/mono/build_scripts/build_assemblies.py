@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import os.path
 import shlex
-import shutil
 import subprocess
 from dataclasses import dataclass
 
@@ -101,12 +100,7 @@ def find_msbuild_tools_path_reg():
                 raise ValueError("Value of `installationPath` entry is empty")
 
             # Since VS2019, the directory is simply named "Current"
-            msbuild_dir = os.path.join(val, "MSBuild", "Current", "Bin")
-            if os.path.isdir(msbuild_dir):
-                return msbuild_dir
-
-            # Directory name "15.0" is used in VS 2017
-            return os.path.join(val, "MSBuild", "15.0", "Bin")
+            return os.path.join(val, "MSBuild", "Current", "Bin")
 
         raise ValueError("Cannot find `installationPath` entry")
     except ValueError as e:
@@ -184,19 +178,17 @@ def run_msbuild(tools: ToolsLocation, sln: str, chdir_to: str, msbuild_args: lis
         # The (Csc/Vbc/Fsc)ToolExe environment variables are required when
         # building with Mono's MSBuild. They must point to the batch files
         # in Mono's bin directory to make sure they are executed with Mono.
-        msbuild_env.update(
-            {
-                "CscToolExe": os.path.join(tools.mono_bin_dir, "csc.bat"),
-                "VbcToolExe": os.path.join(tools.mono_bin_dir, "vbc.bat"),
-                "FscToolExe": os.path.join(tools.mono_bin_dir, "fsharpc.bat"),
-            }
-        )
+        msbuild_env.update({
+            "CscToolExe": os.path.join(tools.mono_bin_dir, "csc.bat"),
+            "VbcToolExe": os.path.join(tools.mono_bin_dir, "vbc.bat"),
+            "FscToolExe": os.path.join(tools.mono_bin_dir, "fsharpc.bat"),
+        })
 
     # We want to control cwd when running msbuild, because that's where the search for global.json begins.
     return subprocess.call(args, env=msbuild_env, cwd=chdir_to)
 
 
-def build_godot_api(msbuild_tool, module_dir, output_dir, precision, no_deprecated, werror):
+def build_godot_api(msbuild_tool, module_dir, output_dir, push_nupkgs_local, precision, no_deprecated, werror):
     target_filenames = [
         "GodotSharp.dll",
         "GodotSharp.pdb",
@@ -215,6 +207,8 @@ def build_godot_api(msbuild_tool, module_dir, output_dir, precision, no_deprecat
         targets = [os.path.join(editor_api_dir, filename) for filename in target_filenames]
 
         args = ["/restore", "/t:Build", "/p:Configuration=" + build_config, "/p:NoWarn=1591"]
+        if push_nupkgs_local:
+            args += ["/p:ClearNuGetLocalCache=true", "/p:PushNuGetToLocalSource=" + push_nupkgs_local]
         if precision == "double":
             args += ["/p:GodotFloat64=true"]
         if no_deprecated:
@@ -257,7 +251,7 @@ def build_godot_api(msbuild_tool, module_dir, output_dir, precision, no_deprecat
     return 0
 
 
-def generate_sdk_package_versions(local_development=False):
+def generate_sdk_package_versions(package_version=None):
     # I can't believe importing files in Python is so convoluted when not
     # following the golden standard for packages/modules.
     import os
@@ -274,23 +268,43 @@ def generate_sdk_package_versions(local_development=False):
     version_info = get_version_info("")
     sys.path.remove(root_path)
 
-    if local_development:
-        version_info["status"] = "ciallo.local"
-
-    version_str = "{major}.{minor}.{patch}".format(**version_info)
     version_status = version_info["status"]
-    if version_status != "stable":  # Pre-release
+    godotsharp_version_str = "{major}.{minor}.{patch}".format(**version_info)
+    godot_dotnet_version_str = "{major}.{minor}.{patch}".format(**version_info)
+    if version_status == "stable":
+        # For stable versions, use the latest revision version available
+        # of the Godot .NET packages.
+        godot_dotnet_version_str = ".*"
+    else:
+        # Pre-releases and development builds.
+
         # If version was overridden to be e.g. "beta3", we insert a dot between
         # "beta" and "3" to follow SemVer 2.0.
-        # Dot-separated custom statuses are already SemVer prerelease identifiers.
         import re
 
-        if "." not in version_status:
-            match = re.search(r"[\d]+$", version_status)
-            if match:
-                pos = match.start()
-                version_status = version_status[:pos] + "." + version_status[pos:]
-        version_str += "-" + version_status
+        match = re.search(r"[\d]+$", version_status)
+        if match:
+            pos = match.start()
+            godotsharp_version_status = version_status[:pos]
+            godot_dotnet_version_status = version_status[:pos]
+
+            # "dev" pre-releases always use the "alpha" label in the Godot .NET packages.
+            if godot_dotnet_version_status == "dev":
+                godot_dotnet_version_status = "alpha"
+
+            godotsharp_version_status += f".{version_status[pos:]}"
+            godot_dotnet_version_status += f".{version_status[pos:]}"
+        else:
+            # If the version status is not numbered, it must be a development build.
+            # Development builds always use the "dev" label in the Godot .NET packages.
+            godot_dotnet_version_status = "dev"
+            godotsharp_version_status = version_status
+
+        godotsharp_version_str += f"-{godotsharp_version_status}"
+        godot_dotnet_version_str += f"-{godot_dotnet_version_status}"
+
+    if package_version:
+        godotsharp_version_str = package_version
 
     import version
 
@@ -305,15 +319,16 @@ def generate_sdk_package_versions(local_development=False):
         + [f"GODOT{version.major}_{version.minor}_{v}_OR_GREATER" for v in range(0, version.patch + 1)]
     )
 
-    props = """<Project>
+    props = f"""<Project>
   <PropertyGroup>
-    <PackageVersion_GodotSharp>{0}</PackageVersion_GodotSharp>
-    <PackageVersion_Godot_NET_Sdk>{0}</PackageVersion_Godot_NET_Sdk>
-    <PackageVersion_Godot_SourceGenerators>{0}</PackageVersion_Godot_SourceGenerators>
-    <GodotVersionConstants>{1}</GodotVersionConstants>
+    <PackageVersion_GodotSharp>{godotsharp_version_str}</PackageVersion_GodotSharp>
+    <PackageVersion_Godot_NET_Sdk>{godotsharp_version_str}</PackageVersion_Godot_NET_Sdk>
+    <PackageVersion_Godot_SourceGenerators>{godotsharp_version_str}</PackageVersion_Godot_SourceGenerators>
+    <PackageVersion_GodotDotNet>{godot_dotnet_version_str}</PackageVersion_GodotDotNet>
+    <_GodotVersionConstants>{";".join(version_defines)}</_GodotVersionConstants>
   </PropertyGroup>
 </Project>
-""".format(version_str, ";".join(version_defines))
+"""
 
     # We write in ../SdkPackageVersions.props.
     with open(os.path.join(dirname(script_path), "SdkPackageVersions.props"), "w", encoding="utf-8", newline="\n") as f:
@@ -345,61 +360,25 @@ def generate_sdk_package_versions(local_development=False):
         f.write(constants)
 
 
-def update_local_development_files(module_dir, output_dir, enabled):
-    target_dir = os.path.join(output_dir, "GodotSharp", "Tools", "LocalDevelopment")
-
-    if os.path.isdir(target_dir):
-        shutil.rmtree(target_dir)
-
-    if not enabled:
-        return
-
-    source_generators_dir = os.path.join(
-        module_dir,
-        "editor",
-        "Godot.NET.Sdk",
-        "Godot.SourceGenerators",
-    )
-    source_paths = (
-        os.path.join(module_dir, "editor", "Godot.NET.Sdk", "Godot.LocalDevelopment.props"),
-        os.path.join(module_dir, "SdkPackageVersions.props"),
-        os.path.join(source_generators_dir, "Godot.SourceGenerators.props"),
-        os.path.join(
-            source_generators_dir,
-            "bin",
-            "Release",
-            "netstandard2.0",
-            "Godot.SourceGenerators.dll",
-        ),
-    )
-
-    os.makedirs(target_dir)
-    for source_path in source_paths:
-        shutil.copy2(source_path, target_dir)
-
-    # Consumers import these files directly, alongside the matching API assemblies
-    # and source generator. The directory is stable across local rebuilds.
-    sdk_dir = os.path.join(target_dir, "Sdk")
-    shutil.copytree(os.path.join(module_dir, "editor", "Godot.NET.Sdk", "Godot.NET.Sdk", "Sdk"), sdk_dir)
-    shutil.copy2(os.path.join(module_dir, "SdkPackageVersions.props"), sdk_dir)
-
-
 def build_all(
     msbuild_tool,
     module_dir,
     output_dir,
     godot_platform,
     dev_debug,
+    push_nupkgs_local,
     precision,
     no_deprecated,
     werror,
-    local_development,
+    package_version=None,
 ):
     # Generate SdkPackageVersions.props and VersionDocsUrl constant
-    generate_sdk_package_versions(local_development)
+    generate_sdk_package_versions(package_version)
 
     # Godot API
-    exit_code = build_godot_api(msbuild_tool, module_dir, output_dir, precision, no_deprecated, werror)
+    exit_code = build_godot_api(
+        msbuild_tool, module_dir, output_dir, push_nupkgs_local, precision, no_deprecated, werror
+    )
     if exit_code != 0:
         return exit_code
 
@@ -408,6 +387,8 @@ def build_all(
     args = ["/restore", "/t:Build", "/p:Configuration=" + ("Debug" if dev_debug else "Release")] + (
         ["/p:GodotPlatform=" + godot_platform] if godot_platform else []
     )
+    if push_nupkgs_local:
+        args += ["/p:ClearNuGetLocalCache=true", "/p:PushNuGetToLocalSource=" + push_nupkgs_local]
     if precision == "double":
         args += ["/p:GodotFloat64=true"]
     exit_code = run_msbuild(msbuild_tool, sln=sln, chdir_to=module_dir, msbuild_args=args)
@@ -416,6 +397,8 @@ def build_all(
 
     # Godot.NET.Sdk
     args = ["/restore", "/t:Build", "/p:Configuration=Release"]
+    if push_nupkgs_local:
+        args += ["/p:ClearNuGetLocalCache=true", "/p:PushNuGetToLocalSource=" + push_nupkgs_local]
     if precision == "double":
         args += ["/p:GodotFloat64=true"]
     if no_deprecated:
@@ -424,17 +407,6 @@ def build_all(
     exit_code = run_msbuild(msbuild_tool, sln=sln, chdir_to=module_dir, msbuild_args=args)
     if exit_code != 0:
         return exit_code
-
-    update_local_development_files(module_dir, output_dir, local_development)
-
-    # Plain metadata for Git hook provisioning without executing the editor.
-    import xml.etree.ElementTree as ET
-
-    sdk_version = ET.parse(os.path.join(module_dir, "SdkPackageVersions.props")).findtext(
-        "./PropertyGroup/PackageVersion_Godot_NET_Sdk"
-    )
-    with open(os.path.join(output_dir, "GodotSharp", "sdk.version"), "w", encoding="utf-8", newline="\n") as metadata:
-        metadata.write(sdk_version + "\n")
 
     return 0
 
@@ -453,20 +425,19 @@ def main():
     )
     parser.add_argument("--godot-platform", type=str, default="")
     parser.add_argument("--mono-prefix", type=str, default="")
+    parser.add_argument("--push-nupkgs-local", type=str, default="")
     parser.add_argument(
         "--precision", type=str, default="single", choices=["single", "double"], help="Floating-point precision level"
     )
     parser.add_argument(
         "--no-deprecated",
         action="store_true",
-        default=True,
+        default=False,
         help="Build GodotSharp without using deprecated features. This is required, if the engine was built with 'deprecated=no'.",
     )
     parser.add_argument("--werror", action="store_true", default=False, help="Treat compiler warnings as errors.")
     parser.add_argument(
-        "--local-development",
-        action="store_true",
-        help="Emit a directly importable SDK, API references, and generator for local development.",
+        "--package-version", help="Override the GodotSharp, Godot.NET.Sdk, and source generator package versions."
     )
 
     args = parser.parse_args()
@@ -475,6 +446,8 @@ def main():
     module_dir = os.path.abspath(os.path.join(this_script_dir, os.pardir))
 
     output_dir = os.path.abspath(args.godot_output_dir)
+
+    push_nupkgs_local = os.path.abspath(args.push_nupkgs_local) if args.push_nupkgs_local else None
 
     msbuild_tool = find_any_msbuild_tool(args.mono_prefix)
 
@@ -488,10 +461,11 @@ def main():
         output_dir,
         args.godot_platform,
         args.dev_debug,
+        push_nupkgs_local,
         args.precision,
         args.no_deprecated,
         args.werror,
-        args.local_development,
+        args.package_version,
     )
     sys.exit(exit_code)
 

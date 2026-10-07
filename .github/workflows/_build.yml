@@ -117,7 +117,7 @@ jobs:
         env:
           GODOT_VERSION_STATUS: ${{ inputs.version_status }}
         run: |
-          python modules/mono/build_scripts/build_assemblies.py \
+          python misc/scripts/build_ciallo_assemblies.py \
             --godot-output-dir ./bin \
             --godot-platform=windows \
             --no-deprecated
@@ -231,7 +231,7 @@ jobs:
         env:
           GODOT_VERSION_STATUS: ${{ inputs.version_status }}
         run: |
-          python modules/mono/build_scripts/build_assemblies.py \
+          python misc/scripts/build_ciallo_assemblies.py \
             --godot-output-dir ./bin \
             --godot-platform=linuxbsd \
             --no-deprecated
@@ -344,7 +344,7 @@ jobs:
         env:
           GODOT_VERSION_STATUS: ${{ inputs.version_status }}
         run: |
-          python modules/mono/build_scripts/build_assemblies.py \
+          python misc/scripts/build_ciallo_assemblies.py \
             --godot-output-dir ./bin \
             --godot-platform=macos \
             --no-deprecated

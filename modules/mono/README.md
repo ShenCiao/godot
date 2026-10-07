@@ -7,11 +7,18 @@
    ```
 3. Build the C# solutions:
    ```sh
-   ./modules/mono/build_scripts/build_assemblies.py --godot-output-dir ./bin
+   python misc/scripts/build_ciallo_assemblies.py --godot-output-dir ./bin
    ```
 
 The paths specified in these examples assume the command is being run from
 the Godot source root.
+
+`misc/scripts/build_ciallo_assemblies.py` is the Ciallo build entry point used by
+VS Code and release CI. It forwards build options to the upstream assembly builder,
+selects the matching package version, and writes `GodotSharp/sdk.version` after a
+successful build. Published builds use `GODOT_VERSION_STATUS=ciallo.g<git-hash>`;
+local builds use `--local-development`. The upstream builder accepts the selected
+version through `--package-version` for GodotSharp, Godot.NET.Sdk and source generators.
 
 # Local C# development
 
@@ -19,7 +26,7 @@ The VS Code `Build .NET Assemblies` task builds the managed tools with
 `--local-development`. The equivalent assembly build is:
 
 ```sh
-./modules/mono/build_scripts/build_assemblies.py --godot-output-dir ./bin \
+python misc/scripts/build_ciallo_assemblies.py --godot-output-dir ./bin \
     --local-development
 ```
 
@@ -47,6 +54,6 @@ Follow the above instructions but build Godot with the precision=double argument
 
 When building the NuGet packages, specify `--precision=double` - for example:
 ```sh
-./modules/mono/build_scripts/build_assemblies.py --godot-output-dir ./bin \
+python misc/scripts/build_ciallo_assemblies.py --godot-output-dir ./bin \
     --local-development --precision=double
 ```

@@ -80,9 +80,11 @@ Use "Build: Windows Debug" in .vscode/tasks.json
 
 ## Native File Dialogs
 
-Runtime `FileDialog` nodes always use the operating system's native file dialog on Windows, macOS, and Linux. Setting `use_native_dialog` to `false` does not disable native dialogs.
+Runtime `FileDialog` nodes always use the operating system's native file dialog on Windows, macOS, and Linux. This is a permanent product requirement and a mandatory upstream-merge invariant. Setting `use_native_dialog` to `false` does not disable native dialogs.
 
 The built-in Godot file browser controls are reserved for `EditorFileDialog`. Runtime `FileDialog` instances do not create those controls, so customization and display properties retain serialization compatibility but do not alter the native dialog, and internal control getters return null.
+
+Runtime construction must stay lightweight: allocating the custom file-browser node tree and hiding it is prohibited. Shared property setters, notifications and callbacks must support the absence of custom controls. The custom UI construction entry point requires explicit editor-browser mode.
 
 Native dialog availability is required. An unavailable native backend completes the request as canceled instead of falling back to the built-in Godot file browser. Linux deployments require a working XDG desktop portal FileChooser implementation.
 

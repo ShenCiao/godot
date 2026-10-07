@@ -32,6 +32,7 @@
 
 #include "core/os/time.h"
 #include "core/version.h"
+#include "servers/display/display_server.h"
 
 // Ciallo: release builds embed the git short-sha in GODOT_VERSION_STATUS (e.g.
 // "ciallo.g3205a0607") so the bundled NuGet packages get a unique version. This

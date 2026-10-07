@@ -8,6 +8,9 @@
 
 #include "layer_2d.h"
 
+#include "core/object/class_db.h"
+#include "servers/rendering/rendering_server.h"
+
 void Layer2D::_update_layer_group() {
 	RS::get_singleton()->canvas_item_set_layer_group(get_canvas_item(), true, composite_mode == COMPOSITE_MODE_ALWAYS, fit_margin, clear_margin);
 }
@@ -44,7 +47,7 @@ void Layer2D::set_layer_blend_mode(LayerBlendMode p_blend_mode) {
 		return;
 	}
 	layer_blend_mode = p_blend_mode;
-	RS::get_singleton()->canvas_item_set_layer_blend_mode(get_canvas_item(), RS::CanvasItemLayerBlendMode(layer_blend_mode));
+	RS::get_singleton()->canvas_item_set_layer_blend_mode(get_canvas_item(), RSE::CanvasItemLayerBlendMode(layer_blend_mode));
 }
 
 Layer2D::LayerBlendMode Layer2D::get_layer_blend_mode() const {
@@ -128,7 +131,7 @@ void Layer2D::_bind_methods() {
 
 Layer2D::Layer2D() {
 	RS::get_singleton()->canvas_item_set_is_layer(get_canvas_item(), true);
-	RS::get_singleton()->canvas_item_set_layer_blend_mode(get_canvas_item(), RS::CanvasItemLayerBlendMode(layer_blend_mode));
+	RS::get_singleton()->canvas_item_set_layer_blend_mode(get_canvas_item(), RSE::CanvasItemLayerBlendMode(layer_blend_mode));
 	RS::get_singleton()->canvas_item_set_clipping_mask(get_canvas_item(), clipping_mask);
 	_update_layer_group();
 }

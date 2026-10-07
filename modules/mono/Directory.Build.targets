@@ -14,4 +14,13 @@
     <Copy SourceFiles="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" DestinationFolder="$(GodotOutputDataDir)Tools\nupkgs\" />
     <Copy Condition=" '$(_HasSymbolsNuGetPackage)' == 'true' " SourceFiles="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg" DestinationFolder="$(GodotOutputDataDir)Tools\nupkgs\" />
   </Target>
+  <Target Name="PushNuGetPackagesToLocalSource" BeforeTargets="Pack"
+    Condition=" '$(_HasNuGetPackage)' == 'true' And '$(PushNuGetToLocalSource)' != '' ">
+    <Copy SourceFiles="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" DestinationFolder="$(PushNuGetToLocalSource)\" />
+    <Copy Condition=" '$(_HasSymbolsNuGetPackage)' == 'true' " SourceFiles="$(PackageOutputPath)$(PackageId).$(PackageVersion).snupkg" DestinationFolder="$(PushNuGetToLocalSource)\" />
+  </Target>
+  <Target Name="ClearNuGetLocalPackageCache" BeforeTargets="Pack"
+    Condition=" '$(_HasNuGetPackage)' == 'true' And '$(ClearNuGetLocalCache.ToLower())' == 'true' ">
+    <RemoveDir Directories="$(NugetPackageRoot)/$(PackageId.ToLower())/$(PackageVersion)" />
+  </Target>
 </Project>
