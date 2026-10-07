@@ -792,6 +792,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		RID texture;
 		Size2i texture_size;
 		Rect2 texture_rect;
+		Rect2i texture_region;
 		ResolvedLayerBlendMode layer_blend_mode = RESOLVED_LAYER_BLEND_NONE;
 		RenderTarget target;
 	};
@@ -850,9 +851,14 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 				break;
 			}
 		}
+		// Enclose the fractional bounds so reused edge texels are cleared before
+		// the group is sampled using its original floating-point rectangle.
+		const Point2i texture_begin = p_texture_rect.position.floor();
+		const Point2i texture_end = p_texture_rect.get_end().ceil();
+		const Rect2i texture_region(texture_begin, texture_end - texture_begin);
 		const RendererRD::TextureStorage::CanvasGroupBufferRIDs buffer =
 				texture_storage->render_target_prepare_canvas_group_buffer_for_draw(
-						p_to_render_target, buffer_index, p_texture_rect,
+						p_to_render_target, buffer_index, texture_region,
 						p_use_mipmaps, Color(0, 0, 0, 0));
 
 		RenderTarget group_target;
@@ -880,6 +886,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		entry.texture = buffer.texture;
 		entry.texture_size = buffer.size;
 		entry.texture_rect = p_texture_rect;
+		entry.texture_region = texture_region;
 		entry.layer_blend_mode = p_layer_blend_mode;
 		entry.target = group_target;
 		render_target_stack.push_back(entry);
@@ -905,7 +912,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		const RID group_texture = entry.texture;
 		const Size2i group_texture_size = entry.texture_size;
 		if (p_owner->canvas_group->blur_mipmaps) {
-			texture_storage->render_target_gen_canvas_group_buffer_mipmaps(p_to_render_target, buffer_index, p_owner->global_rect_cache);
+			texture_storage->render_target_gen_canvas_group_buffer_mipmaps(p_to_render_target, buffer_index, entry.texture_region);
 		}
 
 		render_target_stack.remove_at(stack_index);
