@@ -4214,11 +4214,14 @@ void TextureStorage::update_decal_buffer(const PagedArray<RID> &p_decals, const 
 
 /* RENDER TARGET API */
 
-RID TextureStorage::RenderTarget::get_framebuffer() {
+RID TextureStorage::RenderTarget::get_framebuffer(bool p_resolve) {
 	// We can't resolve into our overridden buffer as it won't be marked as a resolve buffer.
 	// This is only applicable when OpenXR is used and 2D rendering is skipped.
 
 	if (msaa != RSE::VIEWPORT_MSAA_DISABLED && overridden.color.is_null()) {
+		if (!p_resolve) {
+			return FramebufferCacheRD::get_singleton()->get_cache_multiview(view_count, color_multisample);
+		}
 		// Render into our MSAA buffer and resolve into our color buffer.
 		return FramebufferCacheRD::get_singleton()->get_cache_multiview(view_count, color_multisample, color);
 	} else {
@@ -4239,6 +4242,7 @@ void TextureStorage::_clear_render_target_canvas_group_buffer(RenderTarget::Canv
 	r_buffer.texture = RID();
 	r_buffer.color_multisample = RID();
 	r_buffer.framebuffer = RID();
+	r_buffer.resolve_framebuffer = RID();
 	r_buffer.mipmap0 = RID();
 	r_buffer.mipmaps.clear();
 	r_buffer.uniform_set = RID();
@@ -4497,8 +4501,9 @@ void TextureStorage::_create_render_target_canvas_group_buffer(RenderTarget *rt,
 		RD::FramebufferPass pass;
 		pass.color_attachments.push_back(0);
 		pass.resolve_attachments.push_back(1);
-		buffer.framebuffer = FramebufferCacheRD::get_singleton()->get_cache_multipass(
+		buffer.resolve_framebuffer = FramebufferCacheRD::get_singleton()->get_cache_multipass(
 				{ buffer.color_multisample, buffer.mipmap0 }, { pass });
+		buffer.framebuffer = FramebufferCacheRD::get_singleton()->get_cache(buffer.color_multisample);
 	} else {
 		buffer.framebuffer = FramebufferCacheRD::get_singleton()->get_cache(buffer.mipmap0);
 	}
@@ -4805,11 +4810,11 @@ bool TextureStorage::render_target_is_using_debanding(RID p_render_target) const
 	return rt->use_debanding;
 }
 
-RID TextureStorage::render_target_get_rd_framebuffer(RID p_render_target) {
+RID TextureStorage::render_target_get_rd_framebuffer(RID p_render_target, bool p_resolve) {
 	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
 	ERR_FAIL_NULL_V(rt, RID());
 
-	return rt->get_framebuffer();
+	return rt->get_framebuffer(p_resolve);
 }
 
 RID TextureStorage::render_target_get_rd_texture(RID p_render_target) {
@@ -5352,13 +5357,7 @@ TextureStorage::CanvasGroupBufferRIDs TextureStorage::render_target_prepare_canv
 
 	Rect2i region;
 	if (_render_target_get_clamped_region(rt, p_region, region)) {
-		if (buffer.color_multisample.is_valid()) {
-			// Clear every sample, then resolve even if the group has no draw calls.
-			// Later passes load/store this attachment so nested groups can suspend
-			// and resume their parent without losing its per-sample contents.
-			RD::get_singleton()->draw_list_begin(buffer.framebuffer, RD::DRAW_CLEAR_COLOR_0, { p_clear_color }, 1.0f, 0, region);
-			RD::get_singleton()->draw_list_end();
-		} else {
+		if (buffer.color_multisample.is_null()) {
 			// RD hazard workaround:
 			// Not using a framebuffer attachment clear for this. CanvasGroup children
 			// render through buffer.mipmap0, a shared slice view, but the group is later
@@ -5379,6 +5378,7 @@ TextureStorage::CanvasGroupBufferRIDs TextureStorage::render_target_prepare_canv
 
 	result.texture = buffer.texture;
 	result.framebuffer = buffer.framebuffer;
+	result.resolve_framebuffer = buffer.resolve_framebuffer;
 	result.size = buffer.size;
 	return result;
 }

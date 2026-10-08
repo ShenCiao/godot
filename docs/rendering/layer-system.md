@@ -24,12 +24,22 @@ Layer2D retains its Layer identity in both direct and composite rendering.
 Before generating the drawing list, RendererCanvasCull resolves sibling clipping
 relationships and selects composition for non-default `self_modulate`, a
 non-default blend override, an effective material, an active clipping relationship
-(including being the Base), `COMPOSITE_MODE_ALWAYS`, or a required local ordering
-boundary. Default layers otherwise draw into the current target.
+(including being the Base), `COMPOSITE_MODE_ALWAYS`, or content that requires a
+local ordering or blend boundary. Default layers otherwise draw into the current target.
 
 A composited child contains its own internal ordering. Additional ordering that
 would escape through ordinary Node2D children activates the enclosing Layer2D's
-composition. The RD backend obtains textures from the existing scratch-buffer pool.
+composition. Ordinary child draws using Add, Subtract, Multiply (including eraser
+shaders), or Replace require the nearest enclosing Layer2D to composite. Source-over
+(`blend_mix` and `blend_premul_alpha`) permits direct drawing. The effective material
+and Layer blend override determine this requirement, including through helper nodes.
+
+An isolated child's internal operations stay inside its source. Its output blend
+still acts on the parent: a child Layer composited with Add or Multiply requires
+the parent's boundary too. A clipping stack contains its clipped layers' output
+blends; its Base's blend determines the enclosing requirement. Visibility, viewport
+masks, reparenting and shader changes are evaluated on each traversal.
+The RD backend obtains textures from the existing scratch-buffer pool.
 
 Changes take effect on the next render. `is_composite_active()` reports the most
 recent visible canvas traversal, including when multiple viewports share a canvas.
@@ -43,10 +53,12 @@ explicit SubViewport setting.
 
 With MSAA enabled, each pooled slot has a multisample color attachment and an
 ordinary resolved texture. Both use the Viewport's color format, including HDR.
-The standard RenderingDevice render pass resolves the color before a group is
-sampled for composition. The source exposed as `TEXTURE` remains a single-sample,
-associated-alpha texture. Nested passes preserve the parent's multisample content
-until drawing resumes. Empty and reused slots are cleared to transparent.
+The first draw clears the multisample attachment to transparent. Suspended parent
+passes preserve their samples; color resolves when the group completes or a shader
+reads its suspended parent's screen texture. Empty sources clear and resolve before
+sampling too. The source exposed as `TEXTURE` remains a single-sample,
+associated-alpha texture. The main canvas resolves before backbuffer reads and at
+the end of canvas drawing.
 
 Changing `msaa_2d` releases pooled attachments, including currently unused slots;
 they are allocated again on demand. Disabling MSAA uses the single-sample path.

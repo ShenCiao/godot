@@ -221,16 +221,16 @@ bool RendererCanvasCull::_prepare_layer_tree(Item *p_item, Item *p_material_owne
 	}
 
 	_prepare_layer_siblings(p_item, p_item->child_items.ptr(), p_item->child_items.size());
-	bool needs_order_boundary = p_item->sort_y;
+	bool needs_composite_boundary = p_item->sort_y;
 	for (Item *child : p_item->child_items) {
-		const bool child_order_escapes = _prepare_layer_tree(child, p_material_owner, p_canvas_cull_mask);
+		const bool child_needs_boundary = _prepare_layer_tree(child, p_material_owner, p_canvas_cull_mask);
 		if (child->visible && (child->visibility_layer & p_canvas_cull_mask)) {
-			needs_order_boundary |= child_order_escapes || child->z_index != 0 || !child->z_relative || child->behind;
+			needs_composite_boundary |= child_needs_boundary || child->z_index != 0 || !child->z_relative || child->behind;
 		}
 	}
 
 	if (p_item->layer_group != nullptr) {
-		const bool composite = p_item->layer_group->always_composite || p_item->layer_source_required || needs_order_boundary ||
+		const bool composite = p_item->layer_group->always_composite || p_item->layer_source_required || needs_composite_boundary ||
 				!p_item->self_modulate.is_equal_approx(Color(1, 1, 1, 1)) ||
 				p_item->layer_blend_mode != RSE::CANVAS_ITEM_LAYER_BLEND_MODE_DEFAULT || p_material_owner->material.is_valid();
 		if (composite != (p_item->canvas_group != nullptr)) {
@@ -245,9 +245,13 @@ bool RendererCanvasCull::_prepare_layer_tree(Item *p_item, Item *p_material_owne
 		}
 	}
 
-	// Only ordering that is not already contained in a composited child
-	// needs to activate the nearest enclosing Layer2D's group path.
-	return needs_order_boundary && !_uses_transparent_canvas_group(p_item);
+	// Composition contains child operations, but the resulting image's own blend
+	// still acts on its parent. Clipped output is contained by the clipping stack;
+	// the Base's blend determines how that stack is composited into its parent.
+	const bool isolated = _uses_transparent_canvas_group(p_item);
+	const bool non_source_over = !p_item->layer_clipping_enabled && (p_item->commands != nullptr || isolated) &&
+			RSG::canvas_render->canvas_item_uses_non_source_over_blend(p_item, p_material_owner->material);
+	return non_source_over || (needs_composite_boundary && !isolated);
 }
 
 void RendererCanvasCull::_mark_layer_stacks(Item *const *p_items, int p_item_count) {

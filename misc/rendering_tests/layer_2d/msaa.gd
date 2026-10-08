@@ -148,6 +148,52 @@ func _resume_and_reuse() -> void:
 	_pixel(image,Vector2i(17,40),Color(0,0,0,0),"Scratch reuse leaves gaps transparent")
 
 
+func _screen_reads_and_deferred_clear() -> void:
+	_reset()
+	var outer := _layer(content)
+	var inner := _layer(outer)
+	_rect(inner,Rect2(8,8,16,16),Color.RED)
+	_pixel(await _snapshot(),Vector2i(12,12),Color.RED,"Parent first draw can be a nested layer")
+	inner.get_child(0).free()
+	_pixel(await _snapshot(),Vector2i(12,12),Color(0,0,0,0),"Empty nested sources clear before sampling")
+
+	var material := ShaderMaterial.new()
+	material.shader = Shader.new()
+	material.shader.code = """shader_type canvas_item;
+render_mode unshaded, blend_premul_alpha;
+uniform sampler2D screen : hint_screen_texture, repeat_disable, filter_nearest;
+void fragment() { COLOR = vec4(textureLod(screen, SCREEN_UV, 0.0).bgr, 1.0); }
+"""
+	_reset()
+	var background := _rect(content,Rect2(0,0,64,64),Color.RED)
+	outer = _layer(content)
+	var reader := _rect(outer,Rect2(8,8,16,16),Color.WHITE)
+	reader.material = material
+	_pixel(await _snapshot(),Vector2i(12,12),Color.BLUE,"Child screen shader resolves its main target source")
+	background.color = Color.BLUE
+	_pixel(await _snapshot(),Vector2i(12,12),Color.RED,"Screen source changes are resolved in the same frame")
+
+	_reset()
+	outer = _layer(content)
+	var first := _rect(outer,Rect2(0,0,32,32),Color.RED)
+	inner = _layer(outer)
+	reader = _rect(inner,Rect2(8,8,16,16),Color.WHITE)
+	reader.material = material
+	_pixel(await _snapshot(),Vector2i(12,12),Color.BLUE,"Nested screen shader resolves its suspended parent")
+	first.color = Color.GREEN
+	_pixel(await _snapshot(),Vector2i(12,12),Color.GREEN,"Suspended parent's resolve is not stale")
+	first.free()
+	_pixel(await _snapshot(),Vector2i(12,12),Color.BLACK,"Screen shader sees a cleared parent before its first draw")
+
+	# Backbuffer reads after completed groups must resolve the main target too.
+	_reset()
+	outer = _layer(content)
+	_rect(outer,Rect2(0,0,32,32),Color.RED)
+	reader = _rect(content,Rect2(8,8,16,16),Color.WHITE)
+	reader.material = material
+	_pixel(await _snapshot(),Vector2i(12,12),Color.BLUE,"Root screen shader sees preceding layer composition")
+
+
 func _independent_viewports() -> void:
 	_reset()
 	var group := CanvasGroup.new()
@@ -204,12 +250,14 @@ void fragment() {
 			viewport.msaa_2d = mode
 			await _coverage()
 			await _resume_and_reuse()
+			await _screen_reads_and_deferred_clear()
 	viewport.use_hdr_2d = true
 	viewport.msaa_2d = Viewport.MSAA_4X
 	for size in [Vector2i(97,83),Vector2i(65,65),Vector2i(64,64)]:
 		viewport.size = size
 		await _coverage()
 		await _resume_and_reuse()
+		await _screen_reads_and_deferred_clear()
 	await _independent_viewports()
 	print("LAYER_MSAA_REGRESSION checks=%d failures=%d driver=%s" % [checks,failures,RenderingServer.get_current_rendering_driver_name()])
 	quit(1 if failures else 0)

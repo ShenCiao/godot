@@ -28,6 +28,9 @@ func _ready() -> void:
 		viewport.msaa_2d = SubViewport.MSAA_4X
 	add_child(viewport)
 	await _test_opacity_and_material()
+	await _test_child_blends()
+	await _test_eraser_transitions()
+	await _test_nested_blend_boundaries()
 	await _test_default_base()
 	await _test_local_z()
 	await _test_conflict()
@@ -137,6 +140,152 @@ func _test_opacity_and_material() -> void:
 	layer.use_parent_material = false
 	await _snapshot()
 	_check(layer.is_composite_active(), "Switching material owner updates composition")
+
+
+func _blend_material(mode: String, output: String) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = Shader.new()
+	material.shader.code = "shader_type canvas_item; render_mode unshaded, %s; void fragment() { COLOR = %s; }" % [mode, output]
+	return material
+
+
+func _test_child_blends() -> void:
+	# Translucent content makes accidental blending with the external background visible.
+	var cases := [
+		["blend_mix", "vec4(0.0, 1.0, 0.0, 0.5)", Color(0.25, 0.5, 0.25, 1), false],
+		["blend_premul_alpha", "vec4(0.0, 0.5, 0.0, 0.5)", Color(0.25, 0.5, 0.25, 1), false],
+		["blend_add", "vec4(0.0, 1.0, 0.0, 0.5)", Color(0.5, 0.5, 0.25, 1), true],
+		["blend_sub", "vec4(0.1, 0.0, 0.0, 0.5)", Color(0.45, 0.0, 0.75, 1), true],
+		["blend_mul", "vec4(0.0, 1.0, 0.0, 1.0)", Color(0.0, 0.0, 0.5, 1), true],
+		["blend_mul", "vec4(0.25)", Color(0.125, 0.0, 0.875, 1), true],
+		["blend_disabled", "vec4(0.0, 0.25, 0.0, 0.25)", Color(0.0, 0.25, 0.75, 1), true],
+	]
+	for case in cases:
+		_reset()
+		_rect(content, FULL, Color.BLUE)
+		var parent := _layer(content)
+		var layer := _layer(parent)
+		_rect(layer, FULL, Color(1, 0, 0, 0.5))
+		var helper := Node2D.new()
+		layer.add_child(helper)
+		helper.material = _blend_material(case[0], case[1])
+		var stroke := _rect(helper, LEFT, Color.WHITE)
+		stroke.use_parent_material = true
+		var automatic := await _snapshot()
+		_pixel(automatic, Vector2i(8, 8), case[2], "Child %s has isolated-layer semantics" % case[0])
+		_check(layer.is_composite_active() == case[3], "Only non-source-over child blends require composition")
+		_check(not parent.is_composite_active(), "Normal layer output contains the child's blend requirement")
+		layer.composite_mode = Layer2D.COMPOSITE_MODE_ALWAYS
+		_same_image(await _snapshot(), automatic, "Auto matches Always for child %s" % case[0])
+
+
+func _test_eraser_transitions() -> void:
+	_reset()
+	_rect(content, FULL, Color.BLUE)
+	var parent := _layer(content)
+	var layer := _layer(parent)
+	_rect(layer, LEFT, Color.RED)
+	var other := _layer(parent)
+	var material := _blend_material("blend_mul", "vec4(0.0)")
+	# StrokeView uses MultiMeshInstance2D, whose material keeps ordinary CanvasItem blending.
+	var eraser := MultiMeshInstance2D.new()
+	var mesh := QuadMesh.new()
+	mesh.size = FULL.size
+	eraser.multimesh = MultiMesh.new()
+	eraser.multimesh.transform_format = MultiMesh.TRANSFORM_2D
+	eraser.multimesh.mesh = mesh
+	eraser.multimesh.instance_count = 1
+	eraser.multimesh.set_instance_transform_2d(0, Transform2D(0.0, FULL.get_center()))
+	eraser.material = material
+	layer.add_child(eraser)
+	var image := await _snapshot()
+	_pixel(image, Vector2i(8, 8), Color.BLUE, "Eraser exposes the lower layer")
+	_pixel(image, Vector2i(40, 8), Color.BLUE, "Eraser over empty content preserves the background")
+	_check(layer.is_composite_active() and not parent.is_composite_active(), "Eraser isolates only its content layer")
+
+	# Edit the shared Shader resource without changing the material RID.
+	material.shader.code = "shader_type canvas_item; render_mode blend_mix; void fragment() { COLOR = vec4(0.0); }"
+	_pixel(await _snapshot(), Vector2i(8, 8), Color.RED, "Shader edits immediately restore ordinary painting")
+	_check(not layer.is_composite_active(), "Changing the shader to source-over releases composition")
+	material.shader.code = "shader_type canvas_item; render_mode blend_mul; void fragment() { COLOR = vec4(0.0); }"
+	_pixel(await _snapshot(), Vector2i(8, 8), Color.BLUE, "Changing the shader back restores erasing")
+	eraser.visible = false
+	_pixel(await _snapshot(), Vector2i(8, 8), Color.RED, "Hidden eraser restores content")
+	_check(not layer.is_composite_active(), "Hidden eraser releases composition")
+	eraser.visible = true
+	eraser.visibility_layer = 2
+	viewport.canvas_cull_mask = 1
+	await _snapshot()
+	_check(not layer.is_composite_active(), "Viewport-masked eraser releases composition")
+	viewport.canvas_cull_mask = 3
+	_pixel(await _snapshot(), Vector2i(8, 8), Color.BLUE, "Changing viewport visibility restores erasing")
+	viewport.canvas_cull_mask = 0xffffffff
+	eraser.reparent(other)
+	_pixel(await _snapshot(), Vector2i(8, 8), Color.RED, "Moving an eraser to an empty layer cannot erase its sibling")
+	_check(not layer.is_composite_active() and other.is_composite_active(), "Reparenting transfers the composition requirement")
+	eraser.free()
+	await _snapshot()
+	_check(not other.is_composite_active() and not parent.is_composite_active(), "Removing the last eraser releases its boundary")
+
+
+func _test_nested_blend_boundaries() -> void:
+	for mode in [Layer2D.LAYER_BLEND_MODE_ADD, Layer2D.LAYER_BLEND_MODE_MULTIPLY]:
+		_reset()
+		_rect(content, FULL, Color.BLUE)
+		var outer := _layer(content)
+		var parent := _layer(outer)
+		_rect(parent, FULL, Color(1, 0, 0, 0.5))
+		var child := _layer(parent)
+		_rect(child, LEFT, Color(0, 1, 0, 0.5))
+		child.layer_blend_mode = mode
+		var automatic := await _snapshot()
+		_check(parent.is_composite_active(), "A child Layer's output blend requires the parent boundary")
+		_check(not outer.is_composite_active(), "Normal parent output stops propagation")
+		parent.composite_mode = Layer2D.COMPOSITE_MODE_ALWAYS
+		_same_image(await _snapshot(), automatic, "Child Layer blend matches explicit parent isolation")
+		parent.composite_mode = Layer2D.COMPOSITE_MODE_AUTO
+		child.layer_blend_mode = Layer2D.LAYER_BLEND_MODE_NORMAL
+		await _snapshot()
+		_check(not parent.is_composite_active(), "Normal child output releases the parent boundary")
+
+	# Sprite2D is a leaf Layer and follows Layer overrides, including explicit Normal.
+	_reset()
+	_rect(content, FULL, Color.BLUE)
+	var parent := _layer(content)
+	_rect(parent, FULL, Color(1, 0, 0, 0.5))
+	var source := Image.create(16, 48, false, Image.FORMAT_RGBA8)
+	source.fill(Color.WHITE)
+	var sprite := Sprite2D.new()
+	sprite.centered = false
+	sprite.texture = ImageTexture.create_from_image(source)
+	sprite.material = _blend_material("blend_mul", "vec4(0.0, 1.0, 0.0, 0.5)")
+	parent.add_child(sprite)
+	var automatic := await _snapshot()
+	_check(parent.is_composite_active(), "Sprite shader blend requires the parent boundary")
+	parent.composite_mode = Layer2D.COMPOSITE_MODE_ALWAYS
+	_same_image(await _snapshot(), automatic, "Sprite Multiply matches explicit parent isolation")
+	parent.composite_mode = Layer2D.COMPOSITE_MODE_AUTO
+	sprite.layer_blend_mode = Sprite2D.LAYER_BLEND_MODE_NORMAL
+	await _snapshot()
+	_check(not parent.is_composite_active(), "Sprite Normal override takes priority over its Multiply shader")
+
+	# The clipping stack contains clipped output; its Base determines the outer blend.
+	_reset()
+	_rect(content, FULL, Color.BLUE)
+	parent = _layer(content)
+	var base := _layer(parent)
+	_rect(base, FULL, Color(1, 0, 0, 0.5))
+	var clipped := _layer(parent)
+	_rect(clipped, FULL, Color.GREEN)
+	clipped.clipping_mask = true
+	clipped.layer_blend_mode = Layer2D.LAYER_BLEND_MODE_MULTIPLY
+	_pixel(await _snapshot(), Vector2i(8, 8), Color(0, 0, 0.5, 1), "Clipped Multiply preserves the Base's alpha")
+	_check(not parent.is_composite_active(), "Clipping stack contains the clipped output blend")
+	base.layer_blend_mode = Layer2D.LAYER_BLEND_MODE_ADD
+	automatic = await _snapshot()
+	_check(parent.is_composite_active(), "Non-Normal clipping Base output requires the parent boundary")
+	parent.composite_mode = Layer2D.COMPOSITE_MODE_ALWAYS
+	_same_image(await _snapshot(), automatic, "Clipping Base blend matches explicit parent isolation")
 
 
 func _test_default_base() -> void:

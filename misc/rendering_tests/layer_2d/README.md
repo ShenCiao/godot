@@ -8,7 +8,8 @@ bin/godot.windows.editor.dev.x86_64.mono.console.exe --path misc/rendering_tests
 
 The project checks GPU pixels for Base coverage, opacity and materials, local Z,
 onion-skin settings, clipping conflicts and recovery, nested clipping, and
-Sprite2D interoperability. It also checks that 10,000 default layers draw directly.
+Sprite2D interoperability, child blend isolation, eraser visibility/shader/reparent
+transitions, and nested output blends. It also checks that 10,000 default layers draw directly.
 
 Success prints `LAYER_REGRESSION checks=... failures=0` and exits with code 0.
 Invalid-input cases deliberately emit two orphan warnings and two ordering
@@ -28,7 +29,8 @@ bin/godot.windows.editor.x86_64.mono.console.exe --path misc/rendering_tests/lay
 ```
 
 `msaa.gd` compares direct geometry with Layer2D, CanvasGroup and clipping Base
-coverage. It checks nested parent continuation, empty and moved groups, sequential
+coverage. It checks nested parent continuation, deferred clears and screen-texture
+reads, empty and moved groups, sequential
 scratch reuse, disabled/2x/4x/8x transitions, HDR/LDR, capacity growth/shrink, and a
 shared World2D drawn by two Viewports with different sample counts. Success prints
 `LAYER_MSAA_REGRESSION checks=... failures=0` and exits with code zero. It also uses

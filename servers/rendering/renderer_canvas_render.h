@@ -537,6 +537,8 @@ public:
 		}
 	};
 
+	// Layer composition is supported by the RenderingDevice backend.
+	virtual bool canvas_item_uses_non_source_over_blend(const Item *p_item, RID p_material) { return false; }
 	virtual void canvas_render_items(RID p_to_render_target, Item *p_item_list, const Color &p_modulate, Light *p_light_list, Light *p_directional_list, const Transform2D &p_canvas_transform, RSE::CanvasItemTextureFilter p_default_filter, RSE::CanvasItemTextureRepeat p_default_repeat, bool p_snap_2d_vertices_to_pixel, bool &r_sdf_used, RenderingServerTypes::RenderInfo *r_render_info = nullptr) = 0;
 
 	struct LightOccluderInstance {

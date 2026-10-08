@@ -815,13 +815,13 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		return render_target_stack[render_target_stack.size() - 1].target;
 	};
 
-	auto flush_render_items = [&](RenderTarget &p_render_target, bool p_to_backbuffer = false) {
+	auto flush_render_items = [&](RenderTarget &p_render_target, bool p_to_backbuffer = false, bool p_resolve = false) {
 		if (update_skeletons) {
 			mesh_storage->update_mesh_instances();
 			update_skeletons = false;
 		}
 
-		_render_batch_items(p_render_target, item_count, canvas_transform_inverse, p_light_list, r_sdf_used, p_to_backbuffer, r_render_info);
+		_render_batch_items(p_render_target, item_count, canvas_transform_inverse, p_light_list, r_sdf_used, p_to_backbuffer, p_resolve, r_render_info);
 		p_render_target.clear_requested = false;
 		item_count = 0;
 	};
@@ -840,7 +840,9 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 
 	auto push_scratch_target = [&](RenderTargetStackEntry::Type p_type, Item *p_owner, const Rect2 &p_texture_rect, bool p_use_mipmaps, ResolvedLayerBlendMode p_layer_blend_mode, int p_avoid_buffer_index = -1) {
 		RenderTarget &parent_target = get_current_render_target();
-		flush_render_items(parent_target);
+		if (item_count > 0) {
+			flush_render_items(parent_target);
+		}
 
 		int buffer_index = 0;
 		for (;; buffer_index++) {
@@ -866,8 +868,16 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		group_target.render_target = p_to_render_target;
 		group_target.use_linear_colors = use_linear_colors;
 		group_target.framebuffer = buffer.framebuffer;
+		group_target.resolve_framebuffer = buffer.resolve_framebuffer;
 		group_target.use_render_target_clear = false;
 		group_target.render_region = Rect2(Vector2(), texture_storage->render_target_get_size(p_to_render_target));
+		if (buffer.resolve_framebuffer.is_valid()) {
+			// Clear with the first draw, keeping canvas coordinates independent of
+			// the smaller clear/render area and the pooled texture's capacity.
+			group_target.render_region = group_target.render_region.intersection(texture_region);
+			group_target.clear_requested = true;
+			group_target.clear_color = Color(0, 0, 0, 0);
+		}
 
 		if (render_target_stack.is_empty()) {
 			group_target.screen_texture = texture_storage->render_target_get_rd_texture(p_to_render_target);
@@ -907,7 +917,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		RenderTargetStackEntry &entry = render_target_stack[stack_index];
 		DEV_ASSERT(entry.type == RenderTargetStackEntry::TYPE_CANVAS_GROUP);
 		DEV_ASSERT(entry.owner == p_owner);
-		flush_render_items(entry.target);
+		flush_render_items(entry.target, false, true);
 
 		const int buffer_index = entry.buffer_index;
 		const RID group_texture = entry.texture;
@@ -930,7 +940,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		RenderTargetStackEntry entry = render_target_stack[stack_index];
 		DEV_ASSERT(entry.type == RenderTargetStackEntry::TYPE_LAYER_STACK);
 		DEV_ASSERT(entry.owner == p_base);
-		flush_render_items(entry.target);
+		flush_render_items(entry.target, false, true);
 		render_target_stack.remove_at(stack_index);
 
 		Item composite_item;
@@ -963,7 +973,6 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		composite_item.layer_composite_blend_mode = entry.layer_blend_mode;
 
 		RenderTarget &composite_target = get_current_render_target();
-		composite_target.clear_requested = false;
 		items[item_count++] = &composite_item;
 		flush_render_items(composite_target);
 	};
@@ -971,6 +980,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 	while (ci) {
 		bool transparent_group_composite = false;
 		int transparent_group_source_buffer = -1;
+		bool uses_screen_texture = false;
 
 		if (ci->copy_back_buffer && canvas_group_owner == nullptr && render_target_stack.is_empty()) {
 			backbuffer_copy = true;
@@ -987,6 +997,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		if (material.is_valid()) {
 			CanvasMaterialData *md = static_cast<CanvasMaterialData *>(material_storage->material_get_data(material, RendererRD::MaterialStorage::SHADER_TYPE_2D));
 			if (md && md->shader_data->is_valid()) {
+				uses_screen_texture = md->shader_data->uses_screen_texture;
 				if (md->shader_data->uses_screen_texture && canvas_group_owner == nullptr && render_target_stack.is_empty()) {
 					if (!material_screen_texture_cached) {
 						backbuffer_copy = true;
@@ -1037,7 +1048,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		if (ci->canvas_group_owner != nullptr && render_target_stack.is_empty()) {
 			if (canvas_group_owner == nullptr) {
 				// Canvas group begins here, render until before this item
-				flush_render_items(to_render_target);
+				flush_render_items(to_render_target, false, true);
 
 				if (ci->canvas_group_owner->canvas_group->mode != RSE::CANVAS_GROUP_MODE_TRANSPARENT) {
 					Rect2i group_rect = ci->canvas_group_owner->global_rect_cache;
@@ -1091,7 +1102,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 
 		if (backbuffer_copy) {
 			//render anything pending, including clearing if no items
-			flush_render_items(to_render_target);
+			flush_render_items(to_render_target, false, true);
 
 			texture_storage->render_target_copy_to_back_buffer(p_to_render_target, back_buffer_rect, backbuffer_gen_mipmaps);
 
@@ -1112,6 +1123,13 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 			for (Item *base : ci->layer_stack_starts) {
 				push_layer_stack(base, transparent_group_source_buffer);
 			}
+		}
+
+		if (uses_screen_texture && !render_target_stack.is_empty()) {
+			// A scratch target's screen texture is its suspended parent's image.
+			// Resolve only that source, without consuming the current target's queue.
+			RenderTarget &screen_source = render_target_stack.size() == 1 ? to_render_target : render_target_stack[render_target_stack.size() - 2].target;
+			_render_batch_items(screen_source, 0, canvas_transform_inverse, p_light_list, r_sdf_used, false, true, r_render_info);
 		}
 
 		bool queued_item = false;
@@ -1137,7 +1155,7 @@ void RendererCanvasRenderRD::canvas_render_items(RID p_to_render_target, Item *p
 		}
 
 		if (!ci->next || item_count == MAX_RENDER_ITEMS - 1) {
-			flush_render_items(get_current_render_target(), canvas_group_owner != nullptr && render_target_stack.is_empty());
+			flush_render_items(get_current_render_target(), canvas_group_owner != nullptr && render_target_stack.is_empty(), ci->next == nullptr);
 		}
 
 		ci = ci->next;
@@ -1756,6 +1774,28 @@ RendererCanvasRenderRD::ResolvedLayerBlendMode RendererCanvasRenderRD::_resolve_
 		default:
 			return RESOLVED_LAYER_BLEND_NORMAL;
 	}
+}
+
+bool RendererCanvasRenderRD::canvas_item_uses_non_source_over_blend(const Item *p_item, RID p_material) {
+	if (p_item->is_layer && p_item->layer_blend_mode != RSE::CANVAS_ITEM_LAYER_BLEND_MODE_DEFAULT) {
+		return p_item->layer_blend_mode != RSE::CANVAS_ITEM_LAYER_BLEND_MODE_NORMAL;
+	}
+
+	CanvasShaderData *shader_data = shader.default_version_data;
+	if (p_material.is_valid()) {
+		CanvasMaterialData *material_data = static_cast<CanvasMaterialData *>(RendererRD::MaterialStorage::get_singleton()->material_get_data(p_material, RendererRD::MaterialStorage::SHADER_TYPE_2D));
+		if (material_data && material_data->shader_data->version.is_valid() && material_data->shader_data->is_valid()) {
+			shader_data = material_data->shader_data;
+		}
+	}
+
+	// Layer overrides and ordinary CanvasItem blend modes use different pipelines.
+	// In particular, an ordinary blend_mul can erase destination alpha.
+	if (p_item->is_layer) {
+		return _resolve_layer_blend_mode(p_item, shader_data) != RESOLVED_LAYER_BLEND_NORMAL;
+	}
+	return shader_data->blend_mode != RendererRD::MaterialStorage::ShaderData::BLEND_MODE_MIX &&
+			shader_data->blend_mode != RendererRD::MaterialStorage::ShaderData::BLEND_MODE_PREMULTIPLIED_ALPHA;
 }
 
 void RendererCanvasRenderRD::CanvasShaderData::_create_pipeline(PipelineKey p_pipeline_key) {
@@ -2504,7 +2544,7 @@ uint32_t RendererCanvasRenderRD::get_pipeline_compilations(RSE::PipelineSource p
 	return shader.pipeline_compilations[p_source];
 }
 
-void RendererCanvasRenderRD::_render_batch_items(RenderTarget p_to_render_target, int p_item_count, const Transform2D &p_canvas_transform_inverse, Light *p_lights, bool &r_sdf_used, bool p_to_backbuffer, RenderingServerTypes::RenderInfo *r_render_info) {
+void RendererCanvasRenderRD::_render_batch_items(RenderTarget &p_to_render_target, int p_item_count, const Transform2D &p_canvas_transform_inverse, Light *p_lights, bool &r_sdf_used, bool p_to_backbuffer, bool p_resolve, RenderingServerTypes::RenderInfo *r_render_info) {
 	if (p_item_count > 0 && p_to_render_target.screen_texture_size != state.canvas_state_screen_texture_size) {
 		state.canvas_state.screen_pixel_size[0] = 1.0 / p_to_render_target.screen_texture_size.x;
 		state.canvas_state.screen_pixel_size[1] = 1.0 / p_to_render_target.screen_texture_size.y;
@@ -2603,16 +2643,18 @@ void RendererCanvasRenderRD::_render_batch_items(RenderTarget p_to_render_target
 	RID fb_uniform_set;
 	bool clear = p_to_render_target.clear_requested;
 	Color clear_color = p_to_render_target.clear_color;
+	bool needs_resolve = p_to_render_target.msaa_needs_resolve;
+	const bool main_target = p_to_render_target.framebuffer.is_null() && !p_to_backbuffer;
 
 	if (p_to_render_target.framebuffer.is_valid()) {
-		framebuffer = p_to_render_target.framebuffer;
+		framebuffer = p_resolve && p_to_render_target.resolve_framebuffer.is_valid() ? p_to_render_target.resolve_framebuffer : p_to_render_target.framebuffer;
 		fb_uniform_set = p_to_render_target.base_uniform_set;
 	} else if (p_to_backbuffer) {
 		framebuffer = texture_storage->render_target_get_rd_backbuffer_framebuffer(p_to_render_target.render_target);
 		fb_uniform_set = texture_storage->render_target_get_backbuffer_uniform_set(p_to_render_target.render_target);
 	} else {
-		framebuffer = texture_storage->render_target_get_rd_framebuffer(p_to_render_target.render_target);
-		texture_storage->render_target_set_msaa_needs_resolve(p_to_render_target.render_target, false); // If MSAA is enabled, our framebuffer will be resolved!
+		framebuffer = texture_storage->render_target_get_rd_framebuffer(p_to_render_target.render_target, p_resolve);
+		needs_resolve = texture_storage->render_target_get_msaa_needs_resolve(p_to_render_target.render_target);
 
 		if (p_to_render_target.use_render_target_clear && texture_storage->render_target_is_clear_requested(p_to_render_target.render_target)) {
 			clear = true;
@@ -2636,9 +2678,19 @@ void RendererCanvasRenderRD::_render_batch_items(RenderTarget p_to_render_target
 		}
 	}
 
+	const bool resolve_only = p_resolve && needs_resolve;
+	if (has_instances || clear || resolve_only) {
+		const bool multisampled = RD::get_singleton()->framebuffer_format_get_texture_samples(RD::get_singleton()->framebuffer_get_format(framebuffer), 0) != RD::TEXTURE_SAMPLES_1;
+		p_to_render_target.msaa_needs_resolve = multisampled && !p_resolve;
+		p_to_render_target.clear_requested = false;
+		if (main_target) {
+			texture_storage->render_target_set_msaa_needs_resolve(p_to_render_target.render_target, p_to_render_target.msaa_needs_resolve);
+		}
+	}
+
 	if (!has_instances) {
-		if (clear) {
-			RD::get_singleton()->draw_list_begin(framebuffer, RD::DRAW_CLEAR_COLOR_0, clear_color, 1.0f, 0, p_to_render_target.render_region, RDD::BreadcrumbMarker::UI_PASS);
+		if (clear || resolve_only) {
+			RD::get_singleton()->draw_list_begin(framebuffer, clear ? RD::DRAW_CLEAR_COLOR_0 : RD::DRAW_DEFAULT_ALL, clear_color, 1.0f, 0, p_to_render_target.render_region, RDD::BreadcrumbMarker::UI_PASS);
 			RD::get_singleton()->draw_list_end();
 		}
 		state.current_batch_index = 0;
@@ -2661,6 +2713,9 @@ void RendererCanvasRenderRD::_render_batch_items(RenderTarget p_to_render_target
 	RD::FramebufferFormatID fb_format = RD::get_singleton()->framebuffer_get_format(framebuffer);
 
 	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(framebuffer, clear ? RD::DRAW_CLEAR_COLOR_0 : RD::DRAW_DEFAULT_ALL, clear_color, 1.0f, 0, p_to_render_target.render_region, RDD::BreadcrumbMarker::UI_PASS);
+	if (p_to_render_target.resolve_framebuffer.is_valid()) {
+		RD::get_singleton()->draw_list_set_viewport(draw_list, Rect2(Vector2(), texture_storage->render_target_get_size(p_to_render_target.render_target)));
+	}
 
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, fb_uniform_set, BASE_UNIFORM_SET);
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, state.default_transforms_uniform_set, TRANSFORMS_UNIFORM_SET);
@@ -2679,9 +2734,14 @@ void RendererCanvasRenderRD::_render_batch_items(RenderTarget p_to_render_target
 		if (current_clip != current_batch->clip) {
 			current_clip = current_batch->clip;
 			if (current_clip) {
-				RD::get_singleton()->draw_list_enable_scissor(draw_list, current_clip->final_clip_rect);
+				const Rect2 clip_rect = p_to_render_target.resolve_framebuffer.is_valid() ? current_clip->final_clip_rect.intersection(p_to_render_target.render_region) : current_clip->final_clip_rect;
+				RD::get_singleton()->draw_list_enable_scissor(draw_list, clip_rect);
 			} else {
-				RD::get_singleton()->draw_list_disable_scissor(draw_list);
+				if (p_to_render_target.resolve_framebuffer.is_valid()) {
+					RD::get_singleton()->draw_list_enable_scissor(draw_list, p_to_render_target.render_region);
+				} else {
+					RD::get_singleton()->draw_list_disable_scissor(draw_list);
+				}
 			}
 		}
 

@@ -100,6 +100,7 @@ public:
 	struct CanvasGroupBufferRIDs {
 		RID texture;
 		RID framebuffer;
+		RID resolve_framebuffer;
 		Size2i size;
 	};
 
@@ -438,6 +439,7 @@ private:
 			RID texture;
 			RID color_multisample;
 			RID framebuffer;
+			RID resolve_framebuffer;
 			RID mipmap0;
 			Vector<RID> mipmaps;
 			RID uniform_set;
@@ -512,7 +514,7 @@ private:
 		bool clear_requested;
 		Color clear_color;
 
-		RID get_framebuffer();
+		RID get_framebuffer(bool p_resolve = true);
 	};
 
 	mutable RID_Owner<RenderTarget> render_target_owner;
@@ -943,7 +945,7 @@ public:
 	virtual void render_target_set_velocity_target_size(RID p_render_target, const Size2i &p_target_size) override {}
 	virtual Size2i render_target_get_velocity_target_size(RID p_render_target) const override { return Size2i(0, 0); }
 
-	RID render_target_get_rd_framebuffer(RID p_render_target);
+	RID render_target_get_rd_framebuffer(RID p_render_target, bool p_resolve = true);
 	RID render_target_get_rd_texture(RID p_render_target);
 	RID render_target_get_rd_texture_slice(RID p_render_target, uint32_t p_layer);
 	RID render_target_get_rd_texture_msaa(RID p_render_target);
