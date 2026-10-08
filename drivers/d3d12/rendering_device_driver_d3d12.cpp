@@ -4559,7 +4559,14 @@ void RenderingDeviceDriverD3D12::_end_render_pass(CommandBufferID p_cmd_buffer) 
 	}
 
 	for (const Resolve &resolve : resolves) {
-		cmd_buf_info->cmd_list->ResolveSubresource(resolve.dst_res, resolve.dst_subres, resolve.src_res, resolve.src_subres, resolve.format);
+		if (!cmd_buf_info->render_pass_state.region_is_all && misc_features_support.partial_resolve_supported && cmd_buf_info->cmd_list_1) {
+			// Attachment resolves use the same region as the render pass.
+			D3D12_RECT rect = cmd_buf_info->render_pass_state.region_rect;
+			cmd_buf_info->cmd_list_1->ResolveSubresourceRegion(resolve.dst_res, resolve.dst_subres, rect.left, rect.top,
+					resolve.src_res, resolve.src_subres, &rect, resolve.format, D3D12_RESOLVE_MODE_AVERAGE);
+		} else {
+			cmd_buf_info->cmd_list->ResolveSubresource(resolve.dst_res, resolve.dst_subres, resolve.src_res, resolve.src_subres, resolve.format);
+		}
 	}
 }
 
@@ -6176,6 +6183,7 @@ Error RenderingDeviceDriverD3D12::_check_capabilities() {
 	res = device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS2, &options2, sizeof(options2));
 	if (SUCCEEDED(res)) {
 		misc_features_support.depth_bounds_supported = options2.DepthBoundsTestSupported;
+		misc_features_support.partial_resolve_supported = options2.ProgrammableSamplePositionsTier >= D3D12_PROGRAMMABLE_SAMPLE_POSITIONS_TIER_1;
 	}
 
 	D3D12_FEATURE_DATA_D3D12_OPTIONS3 options3 = {};

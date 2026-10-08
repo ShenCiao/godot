@@ -60,6 +60,13 @@ sampling too. The source exposed as `TEXTURE` remains a single-sample,
 associated-alpha texture. The main canvas resolves before backbuffer reads and at
 the end of canvas drawing.
 
+Scratch render areas enclose the group's bounds and are clipped to the Viewport.
+Vulkan attachment resolves use the render area. D3D12 uses a regional resolve on
+devices supporting programmable sample positions Tier 1 or higher, with a full
+resolve fallback. The pooled attachments retain their existing capacity.
+Metal constrains the render target width and height to the render area's bottom-right
+extent and uses the attachment's multisample resolve store action.
+
 Changing `msaa_2d` releases pooled attachments, including currently unused slots;
 they are allocated again on demand. Disabling MSAA uses the single-sample path.
 Viewport growth and HDR changes recreate matching attachments, while ordinary

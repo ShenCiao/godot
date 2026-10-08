@@ -30,8 +30,8 @@ bin/godot.windows.editor.x86_64.mono.console.exe --path misc/rendering_tests/lay
 
 `msaa.gd` compares direct geometry with Layer2D, CanvasGroup and clipping Base
 coverage. It checks nested parent continuation, deferred clears and screen-texture
-reads, empty and moved groups, sequential
-scratch reuse, disabled/2x/4x/8x transitions, HDR/LDR, capacity growth/shrink, and a
+reads, empty and moved groups, sequential scratch reuse, fractional and clipped
+resolve bounds, disabled/2x/4x/8x transitions, HDR/LDR, capacity growth/shrink, and a
 shared World2D drawn by two Viewports with different sample counts. Success prints
 `LAYER_MSAA_REGRESSION checks=... failures=0` and exits with code zero. It also uses
 centroid interpolation to check partial-coverage fragment evaluation. On macOS,

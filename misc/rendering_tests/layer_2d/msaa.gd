@@ -146,6 +146,13 @@ func _resume_and_reuse() -> void:
 	_pixel(image,Vector2i(27,40),Color.GREEN,"Second sibling survives scratch reuse")
 	_pixel(image,Vector2i(47,40),Color.RED,"Third sibling survives scratch reuse")
 	_pixel(image,Vector2i(17,40),Color(0,0,0,0),"Scratch reuse leaves gaps transparent")
+	# Nonzero/fractional bounds and Viewport clipping exercise regional resolves.
+	for offset in [Vector2(27.25,31.75),Vector2(-4.25,19.5),Vector2(57.5,58.25)]:
+		_reset()
+		var shape := _rect(content,Rect2(offset,Vector2(13.5,11.25)),Color.GREEN)
+		var direct := await _snapshot()
+		shape.reparent(_layer(content))
+		_same(await _snapshot(),direct,"Regional resolve preserves fractional and clipped bounds")
 
 
 func _screen_reads_and_deferred_clear() -> void:

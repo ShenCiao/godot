@@ -103,6 +103,7 @@ class RenderingDeviceDriverD3D12 : public RenderingDeviceDriver {
 
 	struct MiscFeaturesSupport {
 		bool depth_bounds_supported = false;
+		bool partial_resolve_supported = false;
 	};
 
 	struct SamplerCapabilities {
