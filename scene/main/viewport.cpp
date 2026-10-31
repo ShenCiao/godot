@@ -1701,7 +1701,7 @@ void Viewport::_gui_show_tooltip_at(const Point2i &p_pos) {
 	} else {
 		vr = window->get_usable_parent_rect();
 	}
-	panel->content_scale_factor = popup_scale;
+	panel->set_content_scale_factor(popup_scale / panel->get_contents_scale());
 	r.size *= popup_scale;
 	r.size = r.size.ceil();
 	r.size = r.size.min(panel->get_max_size());

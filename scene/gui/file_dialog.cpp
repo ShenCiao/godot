@@ -916,7 +916,7 @@ void FileDialog::_popup_menu(const Vector2 &p_pos, int p_for_item) {
 		return;
 	}
 
-	item_menu->set_position(file_list->get_screen_position() + p_pos);
+	item_menu->set_position(file_list->get_screen_transform().xform(p_pos));
 	item_menu->reset_size();
 	item_menu->popup();
 }

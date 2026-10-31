@@ -263,6 +263,8 @@ class PopupMenu : public Popup {
 
 	bool shrink_height = true;
 	bool shrink_width = true;
+	Transform2D popup_anchor_transform;
+	Transform2D _get_popup_transform() const;
 
 protected:
 	virtual void _pre_popup() override;
@@ -295,6 +297,7 @@ protected:
 #endif
 
 public:
+	real_t get_contents_scale() const override;
 	// ATTENTION: This is used by the POT generator's scene parser. If the number of properties returned by `_get_items()` ever changes,
 	// this value should be updated to reflect the new size.
 	static const int ITEM_PROPERTY_SIZE = 10;
@@ -463,7 +466,8 @@ class PopupMenuItems : public Control {
 	PopupMenu *popup = nullptr;
 
 public:
-	PopupMenuItems(PopupMenu *p_popup) : popup(p_popup) {}
+	PopupMenuItems(PopupMenu *p_popup) :
+			popup(p_popup) {}
 
 	virtual RID get_focused_accessibility_element() const override;
 	virtual void gui_input(const Ref<InputEvent> &p_event) override;

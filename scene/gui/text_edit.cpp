@@ -679,7 +679,7 @@ void TextEdit::_accessibility_action_menu(const Variant &p_data) {
 	if (context_menu_enabled) {
 		_update_context_menu();
 		adjust_viewport_to_caret();
-		menu->set_position(get_screen_position() + get_caret_draw_pos());
+		menu->set_position(get_screen_transform().xform(get_caret_draw_pos()));
 		menu->reset_size();
 		menu->popup();
 		menu->grab_focus();

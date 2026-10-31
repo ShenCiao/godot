@@ -999,6 +999,7 @@ void RuntimeNodeSelect::_open_selection_list(const Vector<SelectResult> &p_items
 	selection_list->popup();
 
 	selection_list->set_content_scale_factor(1);
+	selection_list->set_content_scale_inherited(false);
 	selection_list->set_min_size(selection_list->get_contents_minimum_size());
 	selection_list->reset_size();
 

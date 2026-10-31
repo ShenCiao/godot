@@ -158,6 +158,14 @@ private:
 	ContentScaleAspect content_scale_aspect = CONTENT_SCALE_ASPECT_IGNORE;
 	ContentScaleStretch content_scale_stretch = CONTENT_SCALE_STRETCH_FRACTIONAL;
 	real_t content_scale_factor = 1.0;
+	bool content_scale_inherited = true;
+	Window *content_scale_parent = nullptr;
+	bool content_scale_update_pending = false;
+	real_t last_effective_content_scale = 1.0;
+	real_t last_contents_scale = 1.0;
+	Transform2D last_content_transform;
+	void _queue_content_scale_update();
+	void _update_content_scale();
 
 	RID accessibility_title_element;
 	RID accessibility_announcement_element;
@@ -297,7 +305,8 @@ public:
 	enum {
 		NOTIFICATION_VISIBILITY_CHANGED = 30,
 		NOTIFICATION_POST_POPUP = 31,
-		NOTIFICATION_THEME_CHANGED = 32
+		NOTIFICATION_THEME_CHANGED = 32,
+		NOTIFICATION_CONTENT_SCALE_CHANGED = 33
 	};
 
 	PackedStringArray get_accessibility_configuration_warnings() const override;
@@ -408,6 +417,11 @@ public:
 
 	void set_content_scale_factor(real_t p_factor);
 	real_t get_content_scale_factor() const;
+	void set_content_scale_inherited(bool p_inherited);
+	bool is_content_scale_inherited() const;
+	real_t get_effective_content_scale_factor() const;
+	// Content-to-window coordinates, excluding scaling already applied by the embedder.
+	virtual real_t get_contents_scale() const;
 
 	void set_nonclient_area(const Rect2i &p_rect);
 	Rect2i get_nonclient_area() const;

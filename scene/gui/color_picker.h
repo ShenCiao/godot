@@ -528,6 +528,7 @@ class ColorPickerButton : public Button {
 	} theme_cache;
 
 	void _about_to_popup();
+	void _update_popup_position();
 	void _color_changed(const Color &p_color);
 	void _modal_closed();
 

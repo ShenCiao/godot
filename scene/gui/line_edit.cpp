@@ -1208,7 +1208,7 @@ void LineEdit::_accessibility_action_menu(const Variant &p_data) {
 	_update_context_menu();
 
 	Point2 pos = Point2(get_caret_pixel_pos().x, (get_size().y + theme_cache.font->get_height(theme_cache.font_size)) / 2);
-	menu->set_position(get_screen_position() + pos);
+	menu->set_position(get_screen_transform().xform(pos));
 	menu->reset_size();
 	menu->popup();
 	menu->grab_focus();

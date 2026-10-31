@@ -341,7 +341,7 @@ int PopupMenu::_get_items_total_height() const {
 
 int PopupMenu::_get_mouse_over(const Point2 &p_over) const {
 	// Transform to scroll_container local coordinates.
-	const Point2 scaled_pos = p_over / get_content_scale_factor();
+	const Point2 scaled_pos = p_over / get_contents_scale();
 	const Point2 over_scroll_container =
 			scroll_container->get_global_transform_with_canvas().xform_inv(scaled_pos);
 
@@ -382,7 +382,7 @@ void PopupMenu::_activate_submenu(int p_over, bool p_by_keyboard) {
 
 	submenu_popup->get_window()->set_exclusive(false); // Ensure mouse inputs to parent menu are not inhibited by the submenu in exclusive mode.
 
-	const float win_scale = get_content_scale_factor();
+	const float win_scale = get_contents_scale();
 
 	const Point2 this_pos = get_position();
 	Rect2 this_rect = Rect2(this_pos, panel->get_size());
@@ -660,7 +660,7 @@ void PopupMenu::_input_from_window_internal(const Ref<InputEvent> &p_event) {
 		item_clickable_area.size.width -= scroll_width;
 	}
 
-	float win_scale = get_content_scale_factor();
+	float win_scale = get_contents_scale();
 	item_clickable_area.position.x += theme_cache.panel_style->get_margin(SIDE_LEFT);
 	item_clickable_area.position.y += theme_cache.panel_style->get_margin(SIDE_TOP);
 	item_clickable_area.position *= win_scale;
@@ -1211,7 +1211,7 @@ void PopupMenu::_close_or_suspend() {
 	if (this_submenu_index != -1) { // Is a submenu.
 		PopupMenu *parent_popup = Object::cast_to<PopupMenu>(get_parent());
 		ERR_FAIL_NULL(parent_popup);
-		Point2 mouse_pos = is_embedded() ? parent_popup->get_mouse_position() * parent_popup->get_content_scale_factor() : Point2(DisplayServer::get_singleton()->mouse_get_position() - parent_popup->get_position());
+		Point2 mouse_pos = is_embedded() ? parent_popup->get_mouse_position() * parent_popup->get_contents_scale() : Point2(DisplayServer::get_singleton()->mouse_get_position() - parent_popup->get_position());
 		if (parent_popup->_get_mouse_over(mouse_pos) == this_submenu_index) {
 			parent_popup->submenu_mouse_exited_ticks_msec = -1;
 			parent_popup->mouse_movement_was_tested = false;
@@ -1318,11 +1318,11 @@ Rect2i PopupMenu::_popup_adjust_rect() const {
 	_update_shadow_offsets();
 
 	if (is_layout_rtl()) {
-		current.position -= Vector2(-panel->get_offset(SIDE_RIGHT), panel->get_offset(SIDE_TOP)) * get_content_scale_factor();
+		current.position -= Vector2(-panel->get_offset(SIDE_RIGHT), panel->get_offset(SIDE_TOP)) * get_contents_scale();
 	} else {
-		current.position -= Vector2(panel->get_offset(SIDE_LEFT), panel->get_offset(SIDE_TOP)) * get_content_scale_factor();
+		current.position -= Vector2(panel->get_offset(SIDE_LEFT), panel->get_offset(SIDE_TOP)) * get_contents_scale();
 	}
-	current.size += Vector2(panel->get_offset(SIDE_LEFT) - panel->get_offset(SIDE_RIGHT), panel->get_offset(SIDE_TOP) - panel->get_offset(SIDE_BOTTOM)) * get_content_scale_factor();
+	current.size += Vector2(panel->get_offset(SIDE_LEFT) - panel->get_offset(SIDE_RIGHT), panel->get_offset(SIDE_TOP) - panel->get_offset(SIDE_BOTTOM)) * get_contents_scale();
 
 	return current;
 }
@@ -1551,6 +1551,14 @@ void PopupMenu::_notification(int p_what) {
 			control->queue_redraw();
 		} break;
 
+		case NOTIFICATION_CONTENT_SCALE_CHANGED: {
+			if (is_visible()) {
+				const Transform2D transform = _get_popup_transform();
+				set_position(transform.xform(popup_anchor_transform.affine_inverse().xform(get_position())));
+				_pre_popup();
+			}
+		} break;
+
 		case NOTIFICATION_WM_SIZE_CHANGED: {
 			if (is_visible()) {
 				const Vector2i offsets = Vector2i(panel->get_offset(SIDE_LEFT) - panel->get_offset(SIDE_RIGHT), panel->get_offset(SIDE_TOP) - panel->get_offset(SIDE_BOTTOM));
@@ -1652,7 +1660,7 @@ void PopupMenu::_notification(int p_what) {
 			if (!activated_by_keyboard && !is_embedded() && autohide_areas.size() && this_submenu_index != -1) {
 				PopupMenu *parent_popup = Object::cast_to<PopupMenu>(get_parent());
 				ERR_FAIL_NULL(parent_popup);
-				const float win_scale = get_content_scale_factor();
+				const float win_scale = get_contents_scale();
 				Point2 mouse_pos = DisplayServer::get_singleton()->mouse_get_position() - get_position();
 				Point2 areas_mouse_pos = mouse_pos - parent_popup->panel_offset_start;
 				for (const Rect2 &E : autohide_areas) {
@@ -2462,7 +2470,7 @@ void PopupMenu::_submenu_hidden() {
 	queue_accessibility_update();
 	control->queue_redraw();
 	if (!activated_by_keyboard) {
-		Point2 mouse_pos = is_embedded() ? get_mouse_position() * get_content_scale_factor() : Point2(DisplayServer::get_singleton()->mouse_get_position() - get_position());
+		Point2 mouse_pos = is_embedded() ? get_mouse_position() * get_contents_scale() : Point2(DisplayServer::get_singleton()->mouse_get_position() - get_position());
 		_mouse_over_update(mouse_pos);
 	}
 }
@@ -3614,7 +3622,7 @@ void PopupMenu::_native_popup(const Rect2i &p_rect) {
 		}
 		popup_pos += DisplayServer::get_singleton()->window_get_position(wid);
 	}
-	float win_scale = get_parent_visible_window()->get_content_scale_factor();
+	float win_scale = get_parent_visible_window()->get_contents_scale();
 	NativeMenu::get_singleton()->set_minimum_width(global_menu, p_rect.size.x * win_scale);
 	NativeMenu::get_singleton()->popup(global_menu, popup_pos);
 }
@@ -3674,8 +3682,7 @@ bool PopupMenu::get_shrink_width() const {
 	return shrink_width;
 }
 
-void PopupMenu::_pre_popup() {
-	real_t popup_scale = 1.0;
+Transform2D PopupMenu::_get_popup_transform() const {
 	bool scale_with_parent = true;
 	Node *parent_node = get_parent();
 
@@ -3706,15 +3713,29 @@ void PopupMenu::_pre_popup() {
 
 	Viewport *vp = get_parent_viewport();
 	if (vp && parent_node) {
-		Size2 scale = is_embedded() ? vp->get_popup_base_transform().get_scale() : vp->get_popup_base_transform_native().get_scale();
+		Transform2D transform = is_embedded() ? vp->get_popup_base_transform() : vp->get_popup_base_transform_native();
 		CanvasItem *c = Object::cast_to<CanvasItem>(parent_node);
 		if (c) {
-			scale *= c->get_global_transform_with_canvas().get_scale();
+			transform *= c->get_global_transform_with_canvas();
 		}
-		popup_scale = MIN(scale.x, scale.y);
+		return transform;
 	}
+	return Transform2D();
+}
 
-	set_content_scale_factor(popup_scale);
+real_t PopupMenu::get_contents_scale() const {
+	if (!is_inside_tree() || !is_content_scale_inherited()) {
+		return Window::get_contents_scale();
+	}
+	const Size2 scale = _get_popup_transform().get_scale();
+	const real_t popup_scale = MIN(scale.x, scale.y);
+	Window *parent_window = get_parent()->get_window();
+	return popup_scale * get_effective_content_scale_factor() / parent_window->get_effective_content_scale_factor();
+}
+
+void PopupMenu::_pre_popup() {
+	popup_anchor_transform = _get_popup_transform();
+	const real_t popup_scale = get_contents_scale();
 	if (is_wrapping_controls()) {
 		Size2 minsize = get_contents_minimum_size() * popup_scale;
 		Size2 maxsize = get_max_size();
@@ -3843,7 +3864,7 @@ PopupMenu::~PopupMenu() {
 }
 
 String PopupMenuItems::get_tooltip(const Point2 &p_pos) const {
-	int over = popup->_get_mouse_over(get_global_transform_with_canvas().xform(p_pos) * popup->get_content_scale_factor());
+	int over = popup->_get_mouse_over(get_global_transform_with_canvas().xform(p_pos) * popup->get_contents_scale());
 	if (over < 0 || over >= popup->items.size()) {
 		return "";
 	}

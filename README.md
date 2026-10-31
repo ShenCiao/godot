@@ -9,10 +9,11 @@ Bug fixes:
 - Use consistent StyleBox margins for Button-family measurement and content placement. `align_to_largest_stylebox` selects either stable maximum margins or the current state's margins; state changes invalidate layout sizes before button signals run. Check and option icons reserve space using the same sizing rules, OptionButton caches content independently of state padding, and vertical icon layouts count text height once. See [Button's theme and property reference](doc/classes/Button.xml).
 
 Features:
+- Window nodes inherent parent node `content_scale_factor`.
 - Pen stylus subpixel coordinate
 - Touch as individual event, separated from mouse event on Windows
-- Add CGAL Arrangement2D and [ConstrainedTriangulation2D](modules/arrangement_2d/constrained_triangulation_2d.md), an immutable constrained Delaunay triangulation snapshot with graph export and exact-predicate point-location queries.
-- Add `INSTANCE_TRANSFORM` canvas_item vertex shader builtin for reading the current MultiMesh instance transform. When a canvas_item shader reads `INSTANCE_TRANSFORM`, the 2D MultiMesh instance transform is not folded into `MODEL_MATRIX`; the shader owns how to apply or repurpose it. (This tortured me a whole freaking year.)
+- Add CGAL Arrangement2D and [ConstrainedTriangulation2D](modules/arrangement_2d/constrained_triangulation_2d.md).
+- Add `INSTANCE_TRANSFORM` canvas_item vertex shader builtin for reading the current MultiMesh instance transform. When a canvas_item shader reads `INSTANCE_TRANSFORM`, the 2D MultiMesh instance transform is not folded into `MODEL_MATRIX`; the shader owns how to apply or repurpose it.
 - [Layer2D/Sprite2D layers](docs/rendering/layer-system.md) with automatic composition, local Z ordering, opacity, blend modes, clipping masks, custom shaders and Viewport MSAA. Requires a RenderingDevice renderer (Forward+ or Mobile); offscreen buffers are pooled and reused across sequential groups and viewport resizes within allocated capacity.
 - CanvasItem Z indices range from `-128` to `127`, using 256 buckets to reduce scratch memory for nested canvas groups. See [rendering constraints](CONTEXT.md#rendering).
 - [Centroid and explicit fragment interpolation](docs/rendering/shader-interpolation.md) for precise shader input sampling with MSAA.

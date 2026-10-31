@@ -1319,20 +1319,11 @@ void Window::_update_viewport_size() {
 	Rect2i attach_to_screen_rect(Point2i(), size);
 	window_transform = Transform2D();
 
-	if (content_scale_stretch == Window::CONTENT_SCALE_STRETCH_INTEGER) {
-		// We always want to make sure that the content scale factor is a whole
-		// number, else there will be pixel wobble no matter what.
-		content_scale_factor = Math::floor(content_scale_factor);
-
-		// A content scale factor of zero is pretty useless.
-		if (content_scale_factor < 1) {
-			content_scale_factor = 1;
-		}
-	}
+	const real_t contents_scale = get_contents_scale();
 
 	if (content_scale_mode == CONTENT_SCALE_MODE_DISABLED || content_scale_size.x == 0 || content_scale_size.y == 0) {
 		final_size = size;
-		final_size_override = Size2(size) / content_scale_factor;
+		final_size_override = Size2(size) / contents_scale;
 	} else {
 		//actual screen video mode
 		Size2 video_mode = size;
@@ -1411,13 +1402,13 @@ void Window::_update_viewport_size() {
 			} break;
 			case CONTENT_SCALE_MODE_CANVAS_ITEMS: {
 				final_size = screen_size;
-				final_size_override = viewport_size / content_scale_factor;
+				final_size_override = viewport_size / contents_scale;
 				attach_to_screen_rect = Rect2(margin, screen_size);
 
 				window_transform.translate_local(margin);
 			} break;
 			case CONTENT_SCALE_MODE_VIEWPORT: {
-				final_size = (viewport_size / content_scale_factor).floor();
+				final_size = (viewport_size / contents_scale).floor();
 				attach_to_screen_rect = Rect2(margin, screen_size);
 
 				window_transform.translate_local(margin);
@@ -1443,11 +1434,21 @@ void Window::_update_viewport_size() {
 
 	if (embedder) {
 		float scale = MIN(embedder->stretch_transform.get_scale().width, embedder->stretch_transform.get_scale().height);
-		Viewport::set_oversampling_override(scale);
+		Viewport::set_oversampling_override(scale * contents_scale);
 		Size2 s = Size2(final_size.width * scale, final_size.height * scale).ceil();
-		RS::get_singleton()->viewport_set_global_canvas_transform(get_viewport_rid(), global_canvas_transform * scale * content_scale_factor);
+		RS::get_singleton()->viewport_set_global_canvas_transform(get_viewport_rid(), global_canvas_transform * scale * contents_scale);
 		RS::get_singleton()->viewport_set_size(get_viewport_rid(), s.width, s.height, 1);
 		embedder->_sub_window_update(this);
+	}
+
+	const real_t effective_scale = get_effective_content_scale_factor();
+	const Transform2D content_transform = get_final_transform();
+	if (last_effective_content_scale != effective_scale || last_contents_scale != contents_scale || last_content_transform != content_transform) {
+		last_effective_content_scale = effective_scale;
+		last_contents_scale = contents_scale;
+		last_content_transform = content_transform;
+		notification(NOTIFICATION_CONTENT_SCALE_CHANGED);
+		emit_signal(SNAME("content_scale_changed"));
 	}
 }
 
@@ -1564,7 +1565,7 @@ Transform2D Window::get_accessibility_transform() const {
 				window_tr.set_origin(get_position() - np->get_position());
 			}
 		}
-		window_tr.set_scale(Vector2(1.f, 1.f) * get_content_scale_factor());
+		window_tr.set_scale(Vector2(1.f, 1.f) * get_contents_scale());
 		return parent_tr.affine_inverse() * window_tr;
 	} else {
 		return Transform2D();
@@ -1598,7 +1599,7 @@ void Window::_notification(int p_what) {
 
 			if (get_embedder() || is_popup()) {
 				AccessibilityServer::get_singleton()->update_set_transform(ae, get_accessibility_transform());
-				AccessibilityServer::get_singleton()->update_set_bounds(ae, Rect2(Point2(), Vector2(size) / get_content_scale_factor()));
+				AccessibilityServer::get_singleton()->update_set_bounds(ae, Rect2(Point2(), Vector2(size) / get_contents_scale()));
 
 				if (accessibility_title_element.is_null()) {
 					accessibility_title_element = AccessibilityServer::get_singleton()->create_sub_element(ae, AccessibilityServerEnums::AccessibilityRole::ROLE_TITLE_BAR);
@@ -1644,6 +1645,13 @@ void Window::_notification(int p_what) {
 		} break;
 
 		case NOTIFICATION_ENTER_TREE: {
+			content_scale_parent = get_parent() ? get_parent()->get_window() : nullptr;
+			if (content_scale_parent) {
+				content_scale_parent->connect(SNAME("content_scale_changed"), callable_mp(this, &Window::_queue_content_scale_update));
+			}
+			if (get_parent_viewport()) {
+				get_parent_viewport()->connect(SNAME("size_changed"), callable_mp(this, &Window::_queue_content_scale_update));
+			}
 			if (is_in_edited_scene_root()) {
 				if (!ProjectSettings::get_singleton()->is_connected("settings_changed", callable_mp(this, &Window::_settings_changed))) {
 					ProjectSettings::get_singleton()->connect("settings_changed", callable_mp(this, &Window::_settings_changed));
@@ -1746,6 +1754,9 @@ void Window::_notification(int p_what) {
 
 			// Emits NOTIFICATION_THEME_CHANGED internally.
 			set_theme_context(ThemeDB::get_singleton()->get_nearest_theme_context(this));
+			if (!visible) {
+				_update_viewport_size();
+			}
 		} break;
 
 		case NOTIFICATION_READY: {
@@ -1777,6 +1788,13 @@ void Window::_notification(int p_what) {
 		} break;
 
 		case NOTIFICATION_EXIT_TREE: {
+			if (content_scale_parent) {
+				content_scale_parent->disconnect(SNAME("content_scale_changed"), callable_mp(this, &Window::_queue_content_scale_update));
+				content_scale_parent = nullptr;
+			}
+			if (get_parent_viewport()) {
+				get_parent_viewport()->disconnect(SNAME("size_changed"), callable_mp(this, &Window::_queue_content_scale_update));
+			}
 			if (ProjectSettings::get_singleton()->is_connected("settings_changed", callable_mp(this, &Window::_settings_changed))) {
 				ProjectSettings::get_singleton()->disconnect("settings_changed", callable_mp(this, &Window::_settings_changed));
 			}
@@ -1894,14 +1912,63 @@ bool Window::get_keep_title_visible() const {
 
 void Window::set_content_scale_factor(real_t p_factor) {
 	ERR_MAIN_THREAD_GUARD;
-	ERR_FAIL_COND(p_factor <= 0);
+	ERR_FAIL_COND(!Math::is_finite(p_factor) || p_factor <= 0);
+	if (content_scale_factor == p_factor) {
+		return;
+	}
 	content_scale_factor = p_factor;
-	_update_viewport_size();
+	_update_window_size();
 }
 
 real_t Window::get_content_scale_factor() const {
 	ERR_READ_THREAD_GUARD_V(0);
 	return content_scale_factor;
+}
+
+void Window::set_content_scale_inherited(bool p_inherited) {
+	ERR_MAIN_THREAD_GUARD;
+	if (content_scale_inherited == p_inherited) {
+		return;
+	}
+	content_scale_inherited = p_inherited;
+	_update_window_size();
+}
+
+bool Window::is_content_scale_inherited() const {
+	ERR_READ_THREAD_GUARD_V(false);
+	return content_scale_inherited;
+}
+
+real_t Window::get_effective_content_scale_factor() const {
+	ERR_READ_THREAD_GUARD_V(1.0);
+	real_t factor = content_scale_factor;
+	if (content_scale_inherited && content_scale_parent) {
+		factor *= content_scale_parent->get_effective_content_scale_factor();
+	}
+	return content_scale_stretch == CONTENT_SCALE_STRETCH_INTEGER ? MAX(1.0, Math::floor(factor)) : factor;
+}
+
+real_t Window::get_contents_scale() const {
+	real_t factor = get_effective_content_scale_factor();
+	Viewport *embedding_viewport = is_inside_tree() ? get_embedder() : nullptr;
+	if (embedding_viewport) {
+		factor /= embedding_viewport->get_window()->get_effective_content_scale_factor();
+	}
+	return factor;
+}
+
+void Window::_queue_content_scale_update() {
+	if (!content_scale_update_pending) {
+		content_scale_update_pending = true;
+		callable_mp(this, &Window::_update_content_scale).call_deferred();
+	}
+}
+
+void Window::_update_content_scale() {
+	content_scale_update_pending = false;
+	if (is_inside_tree()) {
+		_update_window_size();
+	}
 }
 
 void Window::set_nonclient_area(const Rect2i &p_rect) {
@@ -2381,7 +2448,7 @@ Size2 Window::get_clamped_minimum_size() const {
 		return min_size;
 	}
 
-	return min_size.max(get_contents_minimum_size() * get_content_scale_factor());
+	return min_size.max((get_contents_minimum_size() * get_contents_scale()).ceil());
 }
 
 void Window::grab_focus() {
@@ -3470,6 +3537,9 @@ void Window::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_content_scale_factor", "factor"), &Window::set_content_scale_factor);
 	ClassDB::bind_method(D_METHOD("get_content_scale_factor"), &Window::get_content_scale_factor);
+	ClassDB::bind_method(D_METHOD("set_content_scale_inherited", "inherited"), &Window::set_content_scale_inherited);
+	ClassDB::bind_method(D_METHOD("is_content_scale_inherited"), &Window::is_content_scale_inherited);
+	ClassDB::bind_method(D_METHOD("get_effective_content_scale_factor"), &Window::get_effective_content_scale_factor);
 
 	ClassDB::bind_method(D_METHOD("set_mouse_passthrough_polygon", "polygon"), &Window::set_mouse_passthrough_polygon);
 	ClassDB::bind_method(D_METHOD("get_mouse_passthrough_polygon"), &Window::get_mouse_passthrough_polygon);
@@ -3605,6 +3675,7 @@ void Window::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "content_scale_aspect", PROPERTY_HINT_ENUM, "Ignore,Keep,Keep Width,Keep Height,Expand"), "set_content_scale_aspect", "get_content_scale_aspect");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "content_scale_stretch", PROPERTY_HINT_ENUM, "Fractional,Integer"), "set_content_scale_stretch", "get_content_scale_stretch");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "content_scale_factor", PROPERTY_HINT_RANGE, "0.5,8.0,0.01"), "set_content_scale_factor", "get_content_scale_factor");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "content_scale_inherited"), "set_content_scale_inherited", "is_content_scale_inherited");
 
 	ADD_GROUP("HDR Output", "hdr_output_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "hdr_output_requested"), "set_hdr_output_requested", "is_hdr_output_requested");
@@ -3633,6 +3704,7 @@ void Window::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("visibility_changed"));
 	ADD_SIGNAL(MethodInfo("about_to_popup"));
 	ADD_SIGNAL(MethodInfo("theme_changed"));
+	ADD_SIGNAL(MethodInfo("content_scale_changed"));
 	ADD_SIGNAL(MethodInfo("dpi_changed"));
 	ADD_SIGNAL(MethodInfo("titlebar_changed"));
 	ADD_SIGNAL(MethodInfo("title_changed"));
@@ -3640,6 +3712,7 @@ void Window::_bind_methods() {
 
 	BIND_CONSTANT(NOTIFICATION_VISIBILITY_CHANGED);
 	BIND_CONSTANT(NOTIFICATION_THEME_CHANGED);
+	BIND_CONSTANT(NOTIFICATION_CONTENT_SCALE_CHANGED);
 
 	BIND_ENUM_CONSTANT(MODE_WINDOWED);
 	BIND_ENUM_CONSTANT(MODE_MINIMIZED);

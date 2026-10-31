@@ -1567,6 +1567,7 @@ void ColorPicker::_pick_button_pressed() {
 
 	if (!picker_window) {
 		picker_window = memnew(Popup);
+		picker_window->set_content_scale_inherited(false); // Screen sampling uses physical pixels.
 		bool has_feature_exclude_from_capture = DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_SCREEN_EXCLUDE_FROM_CAPTURE);
 		if (!has_feature_exclude_from_capture) {
 			picker_window->set_size(Vector2i(28, 28));
@@ -1760,6 +1761,7 @@ void ColorPicker::_pick_button_pressed_legacy() {
 
 	if (!picker_window) {
 		picker_window = memnew(Popup);
+		picker_window->set_content_scale_inherited(false); // Screen sampling uses physical pixels.
 		picker_window->hide();
 		picker_window->set_transient(true);
 		add_child(picker_window, false, INTERNAL_MODE_FRONT);
@@ -2393,6 +2395,17 @@ void ColorPickerButton::_modal_closed() {
 	}
 }
 
+void ColorPickerButton::_update_popup_position() {
+	Rect2 button_rect = get_screen_rect();
+	if (get_viewport()->is_embedding_subwindows() && popup->get_force_native()) {
+		button_rect = get_viewport()->get_popup_base_transform_native().xform(button_rect);
+	}
+	const Rect2 bounds = popup->get_usable_parent_rect();
+	const Size2 popup_size = popup->get_size();
+	const bool show_above = button_rect.get_end().y + popup_size.y > bounds.get_end().y && button_rect.get_center().y > bounds.get_center().y;
+	popup->set_position(Point2(button_rect.get_center().x - popup_size.x / 2, show_above ? button_rect.position.y - popup_size.y : button_rect.get_end().y));
+}
+
 void ColorPickerButton::pressed() {
 	_update_picker();
 
@@ -2404,23 +2417,10 @@ void ColorPickerButton::pressed() {
 		return;
 	}
 
-	Size2 minsize = popup->get_contents_minimum_size();
-	float viewport_height = get_viewport_rect().size.y;
-
-	popup->reset_size();
 	picker->_update_presets();
 	picker->_update_recent_presets();
-
-	// Determine in which direction to show the popup. By default popup horizontally centered below the button.
-	// But if the popup doesn't fit below and the button is in the bottom half of the viewport, show above.
-	bool show_above = false;
-	if (get_global_position().y + get_size().y + minsize.y > viewport_height && get_global_position().y * 2 + get_size().y > viewport_height) {
-		show_above = true;
-	}
-
-	float h_offset = (get_size().x - minsize.x) / 2;
-	float v_offset = show_above ? -minsize.y : get_size().y;
-	popup->set_position(get_screen_position() + Vector2(h_offset, v_offset));
+	popup->reset_size();
+	_update_popup_position();
 	popup->popup();
 	if (!picker->is_hex_visible() && picker->get_picker_shape() != ColorPicker::SHAPE_NONE) {
 		callable_mp(picker, &ColorPicker::set_focus_on_picker_shape).call_deferred();
@@ -2542,6 +2542,7 @@ void ColorPickerButton::_update_picker() {
 		add_child(popup, false, INTERNAL_MODE_FRONT);
 		picker->connect("color_changed", callable_mp(this, &ColorPickerButton::_color_changed));
 		popup->connect("about_to_popup", callable_mp(this, &ColorPickerButton::_about_to_popup));
+		popup->connect("content_scale_changed", callable_mp(this, &ColorPickerButton::_update_popup_position), CONNECT_DEFERRED);
 		popup->connect("popup_hide", callable_mp(this, &ColorPickerButton::_modal_closed));
 		popup->connect("tree_exiting", callable_mp(this, &ColorPickerButton::_modal_closed));
 		picker->connect(SceneStringName(minimum_size_changed), callable_mp((Window *)popup, &Window::reset_size));

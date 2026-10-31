@@ -3319,7 +3319,7 @@ int Tree::propagate_mouse_event(const Point2i &p_pos, int x_ofs, int y_ofs, int 
 					} else {
 						pos_x = col_ofs + panel_ofs.x;
 					}
-					popup_menu->set_position(get_screen_position() + Point2i(pos_x, _get_title_button_height() + y_ofs + item_h + panel_ofs.y) - theme_cache.offset);
+					popup_menu->set_position(get_screen_transform().xform(Point2(pos_x, _get_title_button_height() + y_ofs + item_h + panel_ofs.y) - theme_cache.offset));
 
 					popup_menu->popup();
 					popup_edited_item = p_item;
@@ -4508,11 +4508,11 @@ bool Tree::edit_selected(bool p_force_edit) {
 		return false;
 	}
 
-	Size2 scale = popup_editor->get_parent_viewport()->get_popup_base_transform().get_scale() * get_global_transform_with_canvas().get_scale();
+	const Transform2D popup_transform = get_screen_transform();
+	Size2 scale = popup_transform.get_scale();
 	real_t popup_scale = MIN(scale.x, scale.y);
 
 	Rect2 rect = _get_item_focus_rect(s);
-	rect.position *= popup_scale;
 	popup_edited_item = s;
 	popup_edited_item_col = col;
 
@@ -4532,8 +4532,8 @@ bool Tree::edit_selected(bool p_force_edit) {
 		return true;
 	} else if (c.mode == TreeItem::CELL_MODE_RANGE && !c.text.is_empty()) {
 		_update_popup_menu(c);
-		popup_menu->set_size(Size2(rect.size.width, 0));
-		popup_menu->set_position(get_screen_position() + rect.position + Point2i(0, rect.size.height));
+		popup_menu->set_size(Size2(rect.size.width * popup_scale, 0));
+		popup_menu->set_position(popup_transform.xform(rect.position + Point2(0, rect.size.height)));
 		popup_menu->popup();
 		popup_edited_item = s;
 		popup_edited_item_col = col;
@@ -4556,7 +4556,7 @@ bool Tree::edit_selected(bool p_force_edit) {
 		// Account for icon.
 		real_t icon_ofs = 0;
 		if (c.icon.is_valid()) {
-			icon_ofs = _get_cell_icon_size(c).x * popup_scale + theme_cache.icon_h_separation;
+			icon_ofs = _get_cell_icon_size(c).x + theme_cache.icon_h_separation;
 		}
 
 		popup_rect.size = rect.size + Vector2(-icon_ofs, value_editor_height);
@@ -4566,7 +4566,7 @@ bool Tree::edit_selected(bool p_force_edit) {
 		if (cache.rtl) {
 			popup_rect.position.x = get_size().width - popup_rect.position.x - popup_rect.size.x;
 		}
-		popup_rect.position += get_screen_position();
+		popup_rect = popup_transform.xform(popup_rect);
 
 		bool hide_focus = !has_focus(true);
 
@@ -4581,10 +4581,8 @@ bool Tree::edit_selected(bool p_force_edit) {
 		text_editor->hide();
 
 		popup_editor->set_position(popup_rect.position);
-		popup_editor->set_size(popup_rect.size * popup_scale);
-		if (!popup_editor->is_embedded()) {
-			popup_editor->set_content_scale_factor(popup_scale);
-		}
+		popup_editor->set_content_scale_factor(popup_scale * popup_editor->get_content_scale_factor() / popup_editor->get_contents_scale());
+		popup_editor->set_size(popup_rect.size);
 		popup_edit_committed = false; // Start edit popup processing.
 		popup_editor->popup();
 		popup_editor->child_controls_changed();
@@ -4605,11 +4603,10 @@ bool Tree::edit_selected(bool p_force_edit) {
 		const String &col_title_ml = columns[col].title;
 		text_editor->set_accessibility_name(col_title_ml.is_empty() ? c.text : col_title_ml);
 
-		popup_editor->set_position(get_screen_position() + rect.position);
-		popup_editor->set_size(rect.size * popup_scale);
-		if (!popup_editor->is_embedded()) {
-			popup_editor->set_content_scale_factor(popup_scale);
-		}
+		rect = popup_transform.xform(rect);
+		popup_editor->set_position(rect.position);
+		popup_editor->set_content_scale_factor(popup_scale * popup_editor->get_content_scale_factor() / popup_editor->get_contents_scale());
+		popup_editor->set_size(rect.size);
 		popup_edit_committed = false; // Start edit popup processing.
 		popup_editor->popup();
 		popup_editor->child_controls_changed();
@@ -4832,7 +4829,7 @@ void Tree::_accessibility_action_set_bool_value(const Variant &p_data, TreeItem 
 }
 
 void Tree::_accessibility_action_edit_custom(const Variant &p_data, TreeItem *p_item, int p_col) {
-	float popup_scale = popup_editor->is_embedded() ? 1.0 : popup_editor->get_parent_visible_window()->get_content_scale_factor();
+	float popup_scale = popup_editor->is_embedded() ? 1.0 : popup_editor->get_parent_visible_window()->get_contents_scale();
 	Rect2 rect;
 	if (select_mode == SELECT_ROW) {
 		rect = p_item->cells[p_col].focus_rect;
@@ -5266,7 +5263,7 @@ void Tree::_notification(int p_what) {
 			rendering_server->canvas_item_set_clip(drop_indicator_ci, true);
 
 			cache.rtl = is_layout_rtl();
-			content_scale_factor = popup_editor->is_embedded() ? 1.0 : popup_editor->get_parent_visible_window()->get_content_scale_factor();
+			content_scale_factor = popup_editor->is_embedded() ? 1.0 : popup_editor->get_parent_visible_window()->get_contents_scale();
 
 			if (root && get_size().x > 0 && get_size().y > 0) {
 				int self_height = 0; // Just to pass a reference, we don't need the root's `self_height`.
@@ -5560,7 +5557,8 @@ void Tree::_notification(int p_what) {
 			if (popup_edited_item != nullptr && popup_editor->is_visible()) {
 				Rect2 rect = _get_item_focus_rect(popup_edited_item);
 
-				popup_editor->set_position(get_screen_position() + rect.position);
+				rect = get_screen_transform().xform(rect);
+				popup_editor->set_position(rect.position);
 				popup_editor->set_size(rect.size);
 				popup_editor->child_controls_changed();
 			}
@@ -7483,6 +7481,7 @@ Tree::Tree() {
 	rs->canvas_item_set_use_parent_material(drop_indicator_ci, true);
 
 	popup_editor = memnew(Popup);
+	popup_editor->connect("content_scale_changed", callable_mp(this, &Tree::_notification).bind(NOTIFICATION_RESIZED), CONNECT_DEFERRED);
 	add_child(popup_editor, false, INTERNAL_MODE_FRONT);
 
 	popup_editor_vb = memnew(VBoxContainer);
